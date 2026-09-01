@@ -2,18 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taghdiya/data/app_store.dart';
 import 'package:taghdiya/data/sample_data.dart';
-import 'package:taghdiya/data/store_scope.dart';
+import 'package:taghdiya/main.dart';
 import 'package:taghdiya/screens/home_shell.dart';
 import 'package:taghdiya/models/models.dart';
 import 'package:taghdiya/screens/client_detail_screen.dart';
+import 'package:taghdiya/screens/new_client_sheet.dart';
 import 'package:taghdiya/screens/new_package_screen.dart';
 import 'package:taghdiya/screens/package_complete_screen.dart';
-import 'package:taghdiya/theme/app_theme.dart';
 import 'package:taghdiya/widgets/app_bottom_nav.dart';
 import 'package:taghdiya/widgets/progress_card.dart';
 
 /// The reference device frame from the spec.
 const _frame = Size(412, 892);
+
+/// The client file's overflow menu, which is typed with a private enum.
+final _overflowMenu = find.byWidgetPredicate(
+  (widget) => widget.runtimeType.toString().startsWith('PopupMenuButton<'),
+);
 
 const SampleSeed _emptySeed = (
   clients: <Client>[],
@@ -32,20 +37,9 @@ extension on WidgetTester {
     addTearDown(view.resetDevicePixelRatio);
 
     final appStore = store ?? AppStore();
-    await pumpWidget(
-      StoreScope(
-        store: appStore,
-        child: MaterialApp(
-          theme: AppTheme.light(),
-          debugShowCheckedModeBanner: false,
-          builder: (context, widget) => Directionality(
-            textDirection: TextDirection.rtl,
-            child: widget ?? const SizedBox.shrink(),
-          ),
-          home: child,
-        ),
-      ),
-    );
+    // Mount the real app widget, not a hand-rolled MaterialApp: locale,
+    // localizations delegates and theme must be the ones that ship.
+    await pumpWidget(TaghdiyaApp(store: appStore, home: child));
     await pump();
     return appStore;
   }
@@ -150,6 +144,43 @@ void main() {
     });
   });
 
+  group('sheets', () {
+    testWidgets('the new-client sheet opens and saves', (tester) async {
+      final store = await tester.pumpScreen(const HomeShell());
+      await tester.tap(find.text('العميلات').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('عميلة جديدة'));
+      await tester.pumpAndSettle();
+
+      final fields = find.descendant(
+        of: find.byType(NewClientSheet),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(fields.at(0), 'سناء قدري');
+      await tester.enterText(fields.at(1), '0521119876');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حفظ'));
+      await tester.pumpAndSettle();
+
+      expect(store.clients.length, 25);
+      expect(store.clients.last.name, 'سناء قدري');
+    });
+
+    testWidgets('the add-appointment sheet opens from the empty day',
+        (tester) async {
+      await tester.pumpScreen(
+        const HomeShell(),
+        store: AppStore(seed: _emptySeed),
+      );
+
+      await tester.tap(find.text('إضافة موعد'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('إضافة موعد اليوم'), findsOneWidget);
+    });
+  });
+
   group('08 · العميلات — فارغ', () {
     testWidgets('invites the first client', (tester) async {
       await tester.pumpScreen(
@@ -179,6 +210,36 @@ void main() {
       expect(find.text('سجل الباقات'), findsOneWidget);
       expect(find.text('غير مدفوعة'), findsOneWidget);
       expect(find.text('مدفوعة'), findsNWidgets(2));
+    });
+
+    testWidgets('the overflow menu opens', (tester) async {
+      await tester.pumpScreen(const ClientDetailScreen(clientId: 'c-nour'));
+
+      await tester.tap(_overflowMenu, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text('تسجيل وزن'), findsOneWidget);
+      expect(find.text('باقة جديدة'), findsOneWidget);
+      expect(find.text('مشاركة تقدّمها'), findsOneWidget);
+    });
+
+    testWidgets('logging a weight from the menu updates the card',
+        (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
+
+      await tester.tap(_overflowMenu, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('تسجيل وزن'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).first, '72.5');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حفظ'));
+      await tester.pumpAndSettle();
+
+      expect(store.currentWeight('c-nour'), 72.5);
     });
 
     testWidgets('recording a payment clears the balance card', (tester) async {
@@ -298,7 +359,7 @@ void main() {
       );
 
       expect(find.text('تَغذية'), findsOneWidget);
-      expect(find.text('أ. رنا عوض · أخصائية تغذية'), findsOneWidget);
+      expect(find.text('أ. رنين دياب · أخصائية تغذية'), findsOneWidget);
       expect(find.text('الباقة الثالثة'), findsOneWidget);
       expect(find.text('نور خالد'), findsOneWidget);
       expect(find.text('−٤٫٢'), findsOneWidget);

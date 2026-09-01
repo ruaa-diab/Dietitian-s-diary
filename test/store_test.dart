@@ -234,6 +234,8 @@ void main() {
       expect(fmtDecimal(73.8), '٧٣٫٨');
       expect(fmtCurrency(100), '١٠٠ ₪');
       expect(fmtSigned(-4.2), '−٤٫٢');
+      expect(fmtSigned(-6), '−٦');
+      expect(fmtSigned(1.5), '+١٫٥');
       expect(fmtSignedPercent(18), '+١٨٪');
       expect(fmtPhone('0541234567'), '٠٥٤ ١٢٣ ٤٥٦٧');
     });

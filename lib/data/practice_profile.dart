@@ -4,7 +4,7 @@
 /// once the dietitian can edit her own details.
 abstract final class PracticeProfile {
   static const brandName = 'تَغذية';
-  static const dietitianName = 'أ. رنا عوض';
+  static const dietitianName = 'أ. رنين دياب';
   static const title = 'أخصائية تغذية';
 
   static String get byline => '$dietitianName · $title';

@@ -47,9 +47,13 @@ String fmtDecimal(num value, {int decimals = 1}) =>
     AppNumerals.localize(value.toStringAsFixed(decimals));
 
 /// A signed delta with the typographic minus/plus, e.g. `-4.2` → `−٤٫٢`.
+///
+/// A whole number loses its decimal, so a `-6` goal reads `−٦` rather
+/// than `−٦٫٠` — the design writes goals without one.
 String fmtSigned(num value, {int decimals = 1}) {
   final sign = value < 0 ? AppNumerals.minus : '+';
-  return '$sign${fmtDecimal(value.abs(), decimals: decimals)}';
+  final places = value == value.roundToDouble() ? 0 : decimals;
+  return '$sign${fmtDecimal(value.abs(), decimals: places)}';
 }
 
 /// A signed whole-number percentage, e.g. `18` → `+١٨٪`.
