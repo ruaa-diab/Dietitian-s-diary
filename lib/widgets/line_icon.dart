@@ -183,6 +183,18 @@ abstract final class AppIcons {
       ..lineTo(18, 12);
   }, strokeWidth: 3);
 
+  /// Bottom nav — حسابي. A person inside a circle, distinct from the
+  /// bare person used for العميلات.
+  static final profile = LineIconData((p) {
+    p
+      ..addOval(Rect.fromCircle(center: const Offset(12, 12), radius: 9))
+      ..addOval(Rect.fromCircle(center: const Offset(12, 10), radius: 3));
+    p
+      ..moveTo(6.4, 19.4)
+      ..cubicTo(7.6, 17.1, 9.6, 15.9, 12, 15.9)
+      ..cubicTo(14.4, 15.9, 16.4, 17.1, 17.6, 19.4);
+  });
+
   /// Renewal loop.
   static final refresh = LineIconData((p) {
     p

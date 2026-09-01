@@ -31,7 +31,6 @@ class Client {
     required this.phone,
     required this.age,
     required this.startDate,
-    this.goalKg,
   });
 
   final String id;
@@ -42,18 +41,14 @@ class Client {
   /// When this client first joined — distinct from any one package's start.
   final DateTime startDate;
 
-  /// Target weight change in kg; negative for a loss goal (e.g. `-6`).
-  final double? goalKg;
-
   String get initial => name.characters.first;
 
-  Client copyWith({String? name, String? phone, int? age, double? goalKg}) => Client(
+  Client copyWith({String? name, String? phone, int? age}) => Client(
         id: id,
         name: name ?? this.name,
         phone: phone ?? this.phone,
         age: age ?? this.age,
         startDate: startDate,
-        goalKg: goalKg ?? this.goalKg,
       );
 }
 
@@ -151,19 +146,6 @@ class Visit {
         scheduledAt: scheduledAt ?? this.scheduledAt,
         status: status ?? this.status,
       );
-}
-
-@immutable
-class WeightLog {
-  const WeightLog({
-    required this.clientId,
-    required this.date,
-    required this.weightKg,
-  });
-
-  final String clientId;
-  final DateTime date;
-  final double weightKg;
 }
 
 /// A package shape the dietitian can sell, as offered on the

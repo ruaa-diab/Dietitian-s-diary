@@ -185,19 +185,6 @@ void main() {
     });
   });
 
-  group('weight tracking', () {
-    test('delta is measured from the first reading', () {
-      expect(store.startWeight('c-nour'), 78.0);
-      expect(store.currentWeight('c-nour'), 73.8);
-      expect(store.weightDelta('c-nour')!, closeTo(-4.2, 0.001));
-    });
-
-    test('logging a weight moves the current value', () {
-      store.logWeight(clientId: 'c-nour', weightKg: 73.1);
-      expect(store.currentWeight('c-nour'), 73.1);
-    });
-  });
-
   group('seeding is deterministic for a given day', () {
     test('two builds of the same day agree', () {
       final day = DateTime(2026, 9, 1);

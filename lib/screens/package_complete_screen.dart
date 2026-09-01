@@ -60,7 +60,6 @@ class _PackageCompleteScreenState extends State<PackageCompleteScreen>
     final client = store.client(pkg.clientId);
 
     final attended = store.attendedCount(pkg.id);
-    final delta = store.weightDelta(client.id);
     final days = ArabicDates.daysBetween(pkg.startDate, pkg.endDate ?? DateTime.now());
     final fullAttendance = attended == pkg.visitCount;
 
@@ -84,7 +83,6 @@ class _PackageCompleteScreenState extends State<PackageCompleteScreen>
                         client: client,
                         package: pkg,
                         attended: attended,
-                        delta: delta,
                         days: days,
                         fullAttendance: fullAttendance,
                       ),
@@ -106,7 +104,6 @@ class _CelebrationCard extends StatelessWidget {
     required this.client,
     required this.package,
     required this.attended,
-    required this.delta,
     required this.days,
     required this.fullAttendance,
   });
@@ -115,14 +112,12 @@ class _CelebrationCard extends StatelessWidget {
   final Client client;
   final ClientPackage package;
   final int attended;
-  final double? delta;
   final int days;
   final bool fullAttendance;
 
   @override
   Widget build(BuildContext context) {
     final firstName = client.name.split(' ').first;
-    final lostKg = delta?.abs();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(26, 34, 26, 26),
@@ -160,10 +155,8 @@ class _CelebrationCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            lostKg == null || lostKg < 0.05
-                ? 'أكملت ${ArabicDates.visits(package.visitCount)}. وقت مناسب لعرض الباقة التالية.'
-                : 'نزلت ${fmtDecimal(lostKg)} كجم في ${ArabicDates.visits(package.visitCount)}.'
-                    ' وقت مناسب لعرض الباقة التالية.',
+            'أكملت ${ArabicDates.visits(package.visitCount)}.'
+            ' وقت مناسب لعرض الباقة التالية.',
             textAlign: TextAlign.center,
             style: AppText.bodyLarge,
           ),
@@ -173,13 +166,12 @@ class _CelebrationCard extends StatelessWidget {
             spacing: 10,
             runSpacing: 8,
             children: [
-              if (delta != null)
-                StatusPill(
-                  label: '${fmtSigned(delta!)} كجم',
-                  background: AppColors.sageBgAlt,
-                  foreground: AppColors.sageText,
-                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
-                ),
+              StatusPill(
+                label: ArabicDates.visits(package.visitCount),
+                background: AppColors.sageBgAlt,
+                foreground: AppColors.sageText,
+                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+              ),
               StatusPill.due(
                 ArabicDates.days(days),
                 padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),

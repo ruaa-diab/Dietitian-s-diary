@@ -5,7 +5,6 @@ typedef SampleSeed = ({
   List<Client> clients,
   List<ClientPackage> packages,
   List<Visit> visits,
-  List<WeightLog> weightLogs,
 });
 
 /// Placeholder roster used until the app is wired to a real database.
@@ -33,7 +32,6 @@ class _SeedBuilder {
   final clients = <Client>[];
   final packages = <ClientPackage>[];
   final visits = <Visit>[];
-  final weights = <WeightLog>[];
 
   int _seq = 0;
   String _id(String prefix) => '$prefix${++_seq}';
@@ -50,7 +48,7 @@ class _SeedBuilder {
   SampleSeed build() {
     _featuredClients();
     _bookOfBusiness();
-    return (clients: clients, packages: packages, visits: visits, weightLogs: weights);
+    return (clients: clients, packages: packages, visits: visits);
   }
 
   // ── The six clients drawn in the mockups ─────────────────────────────
@@ -75,7 +73,6 @@ class _SeedBuilder {
       phone: '0541234567',
       age: 34,
       startDate: _day(75),
-      goalKg: -6,
     ));
 
     _closedPackage(clientId: id, visitCount: 4, price: 100, startDaysAgo: 75, endDaysAgo: 49);
@@ -95,14 +92,6 @@ class _SeedBuilder {
     _visit(id, pkgId, 3, _at(6, 10, 30), VisitStatus.attended);
     _visit(id, pkgId, 4, _at(0, 10, 30), VisitStatus.scheduled);
 
-    _weights(id, const [
-      (20, 78.0),
-      (16, 77.0),
-      (12, 76.2),
-      (8, 75.1),
-      (4, 74.4),
-      (0, 73.8),
-    ]);
   }
 
   /// هبة منصور — second visit of four today at ١٢:٠٠، paid up front.
@@ -114,7 +103,6 @@ class _SeedBuilder {
       phone: '0522987410',
       age: 29,
       startDate: _day(12),
-      goalKg: -5,
     ));
 
     final pkgId = _id('pkg-');
@@ -131,7 +119,6 @@ class _SeedBuilder {
     _visit(id, pkgId, 3, _at(-7, 12, 0), VisitStatus.scheduled);
     _visit(id, pkgId, 4, _at(-14, 12, 0), VisitStatus.scheduled);
 
-    _weights(id, const [(12, 82.5), (5, 81.6)]);
   }
 
   /// ريم عبد الله — came in at ٩:٠٠ this morning and was marked attended,
@@ -144,7 +131,6 @@ class _SeedBuilder {
       phone: '0503311882',
       age: 41,
       startDate: _day(27),
-      goalKg: -8,
     ));
 
     final pkgId = _id('pkg-');
@@ -161,7 +147,6 @@ class _SeedBuilder {
     _visit(id, pkgId, 3, _at(-7, 9, 0), VisitStatus.scheduled);
     _visit(id, pkgId, 4, _at(-14, 9, 0), VisitStatus.scheduled);
 
-    _weights(id, const [(27, 95.4), (14, 93.8), (0, 92.5)]);
   }
 
   /// سلمى يوسف — missed her last visit at ٨:٠٠، which closed her package,
@@ -174,7 +159,6 @@ class _SeedBuilder {
       phone: '0547720513',
       age: 36,
       startDate: _day(30),
-      goalKg: -4,
     ));
 
     final pkgId = _id('pkg-');
@@ -192,7 +176,6 @@ class _SeedBuilder {
     _visit(id, pkgId, 3, _at(16, 8, 0), VisitStatus.attended);
     _visit(id, pkgId, 4, _at(0, 8, 0), VisitStatus.noShow);
 
-    _weights(id, const [(30, 68.9), (16, 67.4), (0, 66.8)]);
   }
 
   /// لمى صبري — eight-visit package, part-paid, ١٠٠ ₪ outstanding.
@@ -204,7 +187,6 @@ class _SeedBuilder {
       phone: '0526640199',
       age: 45,
       startDate: _day(16),
-      goalKg: -10,
     ));
 
     final pkgId = _id('pkg-');
@@ -222,7 +204,6 @@ class _SeedBuilder {
           daysAgo > 0 ? VisitStatus.attended : VisitStatus.scheduled);
     }
 
-    _weights(id, const [(30, 101.2), (16, 99.6), (2, 98.1)]);
   }
 
   /// أمل حجازي — just signed up, nothing paid yet, first visit still ahead.
@@ -234,7 +215,6 @@ class _SeedBuilder {
       phone: '0559084423',
       age: 31,
       startDate: _day(7),
-      goalKg: -6,
     ));
 
     final pkgId = _id('pkg-');
@@ -249,7 +229,6 @@ class _SeedBuilder {
       _visit(id, pkgId, i + 1, _at(-3 - i * 7, 13, 0), VisitStatus.scheduled);
     }
 
-    _weights(id, const [(7, 74.0)]);
   }
 
   /// دعاء شاهين — finished ten days ago and has not renewed.
@@ -261,10 +240,8 @@ class _SeedBuilder {
       phone: '0538812704',
       age: 38,
       startDate: _day(45),
-      goalKg: -5,
     ));
     _closedPackage(clientId: id, visitCount: 4, price: 100, startDaysAgo: 38, endDaysAgo: 10);
-    _weights(id, const [(38, 88.3), (24, 86.9), (10, 85.5)]);
   }
 
   // ── The rest of the book, so the totals are real ─────────────────────
@@ -291,13 +268,7 @@ class _SeedBuilder {
         phone: '05${(20000000 + i * 731913) % 100000000}'.padRight(10, '0'),
         age: 26 + (i * 3) % 24,
         startDate: _day(200 - i * 4),
-        goalKg: -(4 + i % 7).toDouble(),
       ));
-      _weights(id, [
-        (60, 70.0 + (i * 2.3) % 30),
-        (30, 69.0 + (i * 2.3) % 30),
-        (5, 68.2 + (i * 2.3) % 30),
-      ]);
     }
 
     var cursor = 0;
@@ -405,11 +376,5 @@ class _SeedBuilder {
       scheduledAt: at,
       status: status,
     ));
-  }
-
-  void _weights(String clientId, List<(int daysAgo, double kg)> entries) {
-    for (final (daysAgo, kg) in entries) {
-      weights.add(WeightLog(clientId: clientId, date: _day(daysAgo), weightKg: kg));
-    }
   }
 }

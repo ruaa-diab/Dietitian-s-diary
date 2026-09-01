@@ -7,7 +7,6 @@ import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
-import '../widgets/weight_chart.dart';
 import 'new_package_screen.dart';
 import 'progress_card_screen.dart';
 import 'record_payment_sheet.dart';
@@ -40,8 +39,6 @@ class ClientDetailScreen extends StatelessWidget {
               _BalanceCard(client: client),
               const SizedBox(height: 14),
             ],
-            _WeightCard(client: client),
-            const SizedBox(height: 14),
             _PackageHistoryCard(client: client),
           ],
         ),
@@ -74,7 +71,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-enum _ClientAction { logWeight, newPackage, shareProgress }
+enum _ClientAction { newPackage, shareProgress }
 
 class _OverflowMenu extends StatelessWidget {
   const _OverflowMenu({required this.client});
@@ -92,10 +89,6 @@ class _OverflowMenu extends StatelessWidget {
       onSelected: (action) => _run(context, action),
       itemBuilder: (context) => [
         PopupMenuItem(
-          value: _ClientAction.logWeight,
-          child: Text('تسجيل وزن', style: AppText.rowTitleSmall),
-        ),
-        PopupMenuItem(
           value: _ClientAction.newPackage,
           child: Text('باقة جديدة', style: AppText.rowTitleSmall),
         ),
@@ -109,8 +102,6 @@ class _OverflowMenu extends StatelessWidget {
 
   void _run(BuildContext context, _ClientAction action) {
     switch (action) {
-      case _ClientAction.logWeight:
-        _LogWeightSheet.show(context, client);
       case _ClientAction.newPackage:
         Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => NewPackageScreen(clientId: client.id),
@@ -193,11 +184,6 @@ class _SummaryChips extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        if (client.goalKg != null)
-          StatusPill.success(
-            'الهدف ${fmtSigned(client.goalKg!)} كجم',
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          ),
         StatusPill(
           label: 'بدأت ${ArabicDates.dayMonth(latest?.startDate ?? client.startDate)}',
           background: AppColors.card,
@@ -265,93 +251,6 @@ class _BalanceCard extends StatelessWidget {
                 : () => RecordPaymentSheet.show(context, packageId: unpaid.first.id),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _WeightCard extends StatelessWidget {
-  const _WeightCard({required this.client});
-
-  final Client client;
-
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final logs = store.weightsFor(client.id);
-    final current = store.currentWeight(client.id);
-    final start = store.startWeight(client.id);
-    final delta = store.weightDelta(client.id);
-
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('الوزن', style: AppText.sectionTitle),
-              if (delta != null) _DeltaPill(delta: delta),
-            ],
-          ),
-          const SizedBox(height: 6),
-          if (current == null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text('لم تُسجَّل قياسات بعد.', style: AppText.metaSmall),
-            )
-          else ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(fmtDecimal(current), style: AppText.bigWeight),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    start == null
-                        ? 'كجم اليوم'
-                        : 'كجم اليوم · من ${fmtDecimal(start)}',
-                    style: AppText.rowTitleSmall.copyWith(
-                      fontWeight: FontWeight.w400,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            WeightChart(logs: logs),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// The sage delta badge; the arrow flips when weight goes up.
-class _DeltaPill extends StatelessWidget {
-  const _DeltaPill({required this.delta});
-
-  final double delta;
-
-  @override
-  Widget build(BuildContext context) {
-    final lost = delta <= 0;
-    return StatusPill(
-      label: '${fmtSigned(delta)} كجم',
-      background: lost ? AppColors.sageBg : AppColors.dueBg,
-      foreground: lost ? AppColors.sageText : AppColors.clayDark,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      textStyle: AppText.pill.copyWith(fontWeight: FontWeight.w700),
-      leading: Transform.rotate(
-        angle: lost ? 3.14159 : 0,
-        child: LineIcon(
-          AppIcons.arrowUp,
-          color: lost ? AppColors.sageText : AppColors.clayDark,
-          size: 14,
-        ),
       ),
     );
   }
@@ -450,74 +349,3 @@ class _PackageRow extends StatelessWidget {
   }
 }
 
-/// Records a new weight reading for a client.
-class _LogWeightSheet extends StatefulWidget {
-  const _LogWeightSheet({required this.client});
-
-  final Client client;
-
-  static Future<void> show(BuildContext context, Client client) =>
-      showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: AppColors.card,
-        showDragHandle: true,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        builder: (_) => _LogWeightSheet(client: client),
-      );
-
-  @override
-  State<_LogWeightSheet> createState() => _LogWeightSheetState();
-}
-
-class _LogWeightSheetState extends State<_LogWeightSheet> {
-  final _weight = TextEditingController();
-
-  @override
-  void dispose() {
-    _weight.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final value = double.tryParse(_weight.text.trim());
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('تسجيل وزن — ${widget.client.name}', style: AppText.navTitle),
-              const SizedBox(height: 20),
-              AppTextField(
-                controller: _weight,
-                hint: 'الوزن بالكيلوغرام',
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (_) => setState(() {}),
-                suffix: Text('كجم', style: AppText.metaSmall),
-              ),
-              const SizedBox(height: 24),
-              PrimaryButton(
-                label: 'حفظ',
-                onPressed: value == null || value <= 0
-                    ? null
-                    : () {
-                        StoreScope.read(context)
-                            .logWeight(clientId: widget.client.id, weightKg: value);
-                        Navigator.of(context).pop();
-                      },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

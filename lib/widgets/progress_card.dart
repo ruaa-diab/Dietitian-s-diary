@@ -6,7 +6,6 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
 import 'line_icon.dart';
-import 'weight_chart.dart';
 
 /// Screen 09 — the shareable progress card.
 ///
@@ -19,7 +18,6 @@ class ProgressCard extends StatelessWidget {
     required this.client,
     required this.package,
     required this.packageNumber,
-    required this.logs,
     required this.days,
     required this.attendedVisits,
     this.width = 412,
@@ -32,7 +30,6 @@ class ProgressCard extends StatelessWidget {
   /// 1-based position of this package in the client's history — "الباقة
   /// الأولى", "الثانية", and so on.
   final int packageNumber;
-  final List<WeightLog> logs;
   final int days;
   final int attendedVisits;
   final double width;
@@ -49,10 +46,6 @@ class ProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final startKg = logs.isEmpty ? null : logs.first.weightKg;
-    final currentKg = logs.isEmpty ? null : logs.last.weightKg;
-    final lost = (startKg != null && currentKg != null) ? currentKg - startKg : null;
-
     return Container(
       width: width,
       padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 30),
@@ -86,14 +79,17 @@ class ProgressCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _StatTile(
-                    value: lost == null ? '—' : fmtSigned(lost),
-                    label: 'كجم',
+                    value: fmtInt(attendedVisits),
+                    label: 'زيارات',
                     color: AppColors.sage,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _StatTile(value: fmtInt(attendedVisits), label: 'زيارات'),
+                  child: _StatTile(
+                    value: fmtInt(package.visitCount),
+                    label: 'الباقة',
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: _StatTile(value: fmtInt(days), label: 'يوماً')),
@@ -101,10 +97,8 @@ class ProgressCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          _ChartCard(logs: logs, startKg: startKg, currentKg: currentKg),
-          const SizedBox(height: 22),
           Text(
-            _closingLine(lost),
+            _closingLine(),
             textAlign: TextAlign.center,
             style: AppText.rowTitleSmall.copyWith(
               fontWeight: FontWeight.w400,
@@ -117,10 +111,9 @@ class ProgressCard extends StatelessWidget {
     );
   }
 
-  String _closingLine(double? lost) {
+  String _closingLine() {
     final visits = ArabicDates.visits(attendedVisits);
-    if (lost == null || lost >= -0.05) return '$visits، وبداية ثابتة. استمري';
-    return '$visits، ${fmtDecimal(lost.abs())} كجم أقل. استمري';
+    return '$visits في ${ArabicDates.days(days)}. استمري';
   }
 }
 
@@ -210,53 +203,3 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-class _ChartCard extends StatelessWidget {
-  const _ChartCard({required this.logs, required this.startKg, required this.currentKg});
-
-  final List<WeightLog> logs;
-  final double? startKg;
-  final double? currentKg;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                startKg == null ? '—' : '${fmtDecimal(startKg!)} كجم',
-                style: AppText.meta,
-              ),
-              Text(
-                currentKg == null ? '—' : '${fmtDecimal(currentKg!)} كجم',
-                style: AppText.pageHeadline.copyWith(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.sage,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          WeightChart(
-            logs: logs,
-            height: 160,
-            lineWidth: 5,
-            markerRadius: 6,
-            lastMarkerRadius: 10,
-          ),
-        ],
-      ),
-    );
-  }
-}

@@ -63,7 +63,6 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
     }
 
     final package = history.first;
-    final logs = store.weightsFor(client.id);
     final days = ArabicDates.daysBetween(
       package.startDate,
       package.endDate ?? DateTime.now(),
@@ -86,7 +85,6 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
                         client: client,
                         package: package,
                         packageNumber: history.length,
-                        logs: logs,
                         days: days,
                         attendedVisits: store.attendedCount(package.id),
                       ),

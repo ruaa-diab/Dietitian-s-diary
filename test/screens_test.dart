@@ -7,6 +7,8 @@ import 'package:taghdiya/screens/home_shell.dart';
 import 'package:taghdiya/models/models.dart';
 import 'package:taghdiya/screens/client_detail_screen.dart';
 import 'package:taghdiya/screens/new_client_sheet.dart';
+import 'package:taghdiya/screens/welcome_screen.dart';
+import 'package:taghdiya/utils/formatting.dart';
 import 'package:taghdiya/screens/new_package_screen.dart';
 import 'package:taghdiya/screens/package_complete_screen.dart';
 import 'package:taghdiya/widgets/app_bottom_nav.dart';
@@ -24,7 +26,6 @@ const SampleSeed _emptySeed = (
   clients: <Client>[],
   packages: <ClientPackage>[],
   visits: <Visit>[],
-  weightLogs: <WeightLog>[],
 );
 
 extension on WidgetTester {
@@ -204,12 +205,39 @@ void main() {
       expect(find.text('رصيد مستحق'), findsOneWidget);
       expect(find.text('١٠٠ ₪'), findsWidgets);
       expect(find.text('تسجيل دفعة'), findsOneWidget);
-      expect(find.text('الوزن'), findsOneWidget);
-      expect(find.text('٧٣٫٨'), findsOneWidget);
-      expect(find.text('−٤٫٢ كجم'), findsOneWidget);
       expect(find.text('سجل الباقات'), findsOneWidget);
       expect(find.text('غير مدفوعة'), findsOneWidget);
       expect(find.text('مدفوعة'), findsNWidgets(2));
+    });
+
+    testWidgets('marking a visit attended updates the client file',
+        (tester) async {
+      final store = AppStore();
+      await tester.pumpScreen(const HomeShell(), store: store);
+
+      // نور's file before: her fourth visit is still outstanding.
+      final pkg = store.activePackage('c-nour')!;
+      expect(store.attendedCount(pkg.id), 3);
+
+      await tester.tap(find.text('حضرت').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      // Dismiss the celebration that the closing visit raises.
+      await tester.tap(find.text('لاحقاً'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      await tester.tap(find.text('العميلات').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'نور');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('نور خالد'));
+      await tester.pumpAndSettle();
+
+      expect(store.attendedCount(pkg.id), 4);
+      // The package closed, so the file now offers a renewal.
+      expect(find.text('تحتاج تجديد'), findsOneWidget);
+      expect(find.text('٤ زيارات · ١٠٠ ₪'), findsWidgets);
     });
 
     testWidgets('the overflow menu opens', (tester) async {
@@ -218,28 +246,8 @@ void main() {
       await tester.tap(_overflowMenu, warnIfMissed: false);
       await tester.pumpAndSettle();
 
-      expect(find.text('تسجيل وزن'), findsOneWidget);
       expect(find.text('باقة جديدة'), findsOneWidget);
       expect(find.text('مشاركة تقدّمها'), findsOneWidget);
-    });
-
-    testWidgets('logging a weight from the menu updates the card',
-        (tester) async {
-      final store = await tester.pumpScreen(
-        const ClientDetailScreen(clientId: 'c-nour'),
-      );
-
-      await tester.tap(_overflowMenu, warnIfMissed: false);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('تسجيل وزن'));
-      await tester.pumpAndSettle();
-
-      await tester.enterText(find.byType(TextField).first, '72.5');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('حفظ'));
-      await tester.pumpAndSettle();
-
-      expect(store.currentWeight('c-nour'), 72.5);
     });
 
     testWidgets('recording a payment clears the balance card', (tester) async {
@@ -348,7 +356,6 @@ void main() {
                 client: client,
                 package: pkg,
                 packageNumber: 3,
-                logs: store.weightsFor('c-nour'),
                 days: 21,
                 attendedVisits: 3,
               ),
@@ -362,9 +369,7 @@ void main() {
       expect(find.text('أ. رنين دياب · أخصائية تغذية'), findsOneWidget);
       expect(find.text('الباقة الثالثة'), findsOneWidget);
       expect(find.text('نور خالد'), findsOneWidget);
-      expect(find.text('−٤٫٢'), findsOneWidget);
-      expect(find.text('٧٨٫٠ كجم'), findsOneWidget);
-      expect(find.text('٧٣٫٨ كجم'), findsOneWidget);
+      expect(find.text('زيارات'), findsOneWidget);
 
       expect(
         tester.getSize(find.byType(ProgressCard)).width,
@@ -373,15 +378,51 @@ void main() {
     });
   });
 
-  group('shell', () {
-    testWidgets('the new-package tab pushes the flow instead of switching',
-        (tester) async {
+  group('حسابي · profile tab', () {
+    testWidgets('shows the practice at a glance', (tester) async {
       await tester.pumpScreen(const HomeShell());
 
-      await tester.tap(find.text('باقة جديدة').last);
+      await tester.tap(find.text('حسابي').last);
       await tester.pumpAndSettle();
 
-      expect(find.byType(NewPackageScreen), findsOneWidget);
+      expect(find.text('أ. رنين دياب'), findsOneWidget);
+      expect(find.text('أخصائية تغذية'), findsOneWidget);
+      expect(find.text('٢٤'), findsOneWidget);
+      expect(find.text('هذا الشهر'), findsOneWidget);
+      expect(find.text('٣٠٠ ₪'), findsOneWidget);
+    });
+  });
+
+  group('welcome', () {
+    testWidgets('greets Raneen and reports what is waiting', (tester) async {
+      final store = await tester.pumpScreen(const WelcomeScreen());
+
+      expect(find.text('أهلاً بعودتك'), findsOneWidget);
+      expect(find.text('رنين'), findsOneWidget);
+      expect(find.text('زيارتان بانتظارك'), findsOneWidget);
+      expect(
+        find.text('${fmtInt(store.needsRenewal.length)} تحتاج تجديد'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the CTA opens the shell', (tester) async {
+      await tester.pumpScreen(const WelcomeScreen());
+
+      await tester.tap(find.text('ابدئي اليوم'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeShell), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsNothing);
+    });
+
+    testWidgets('a quiet day says so', (tester) async {
+      await tester.pumpScreen(
+        const WelcomeScreen(),
+        store: AppStore(seed: _emptySeed),
+      );
+
+      expect(find.text('لا شيء عاجل اليوم. يوم هادئ.'), findsOneWidget);
     });
   });
 }

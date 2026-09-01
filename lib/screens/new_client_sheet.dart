@@ -6,7 +6,7 @@ import '../theme/app_text_styles.dart';
 import '../widgets/common.dart';
 
 /// Adds a client. Name and phone are enough to start, as the empty-state
-/// copy promises; age, goal and starting weight are optional.
+/// copy promises; age is optional.
 class NewClientSheet extends StatefulWidget {
   const NewClientSheet({super.key});
 
@@ -29,12 +29,10 @@ class _NewClientSheetState extends State<NewClientSheet> {
   final _name = TextEditingController();
   final _phone = TextEditingController();
   final _age = TextEditingController();
-  final _goal = TextEditingController();
-  final _weight = TextEditingController();
 
   @override
   void dispose() {
-    for (final controller in [_name, _phone, _age, _goal, _weight]) {
+    for (final controller in [_name, _phone, _age]) {
       controller.dispose();
     }
     super.dispose();
@@ -43,15 +41,10 @@ class _NewClientSheetState extends State<NewClientSheet> {
   bool get _canSave => _name.text.trim().isNotEmpty && _phone.text.trim().isNotEmpty;
 
   void _save() {
-    final store = StoreScope.read(context);
-    final goal = double.tryParse(_goal.text.trim());
-    store.addClient(
+    StoreScope.read(context).addClient(
       name: _name.text.trim(),
       phone: _phone.text.trim(),
       age: int.tryParse(_age.text.trim()) ?? 0,
-      // A loss goal is entered as a plain number and stored as negative.
-      goalKg: goal == null ? null : -goal.abs(),
-      startWeightKg: double.tryParse(_weight.text.trim()),
     );
     Navigator.of(context).pop();
   }
@@ -86,44 +79,11 @@ class _NewClientSheetState extends State<NewClientSheet> {
                 onChanged: (_) => setState(() {}),
               ),
               const SizedBox(height: 16),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const FieldLabel('العمر'),
-                        AppTextField(
-                          controller: _age,
-                          hint: 'سنة',
-                          keyboardType: TextInputType.number,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const FieldLabel('الوزن الحالي'),
-                        AppTextField(
-                          controller: _weight,
-                          hint: 'كجم',
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const FieldLabel('هدف النزول (كجم)'),
+              const FieldLabel('العمر'),
               AppTextField(
-                controller: _goal,
-                hint: 'مثلاً ٦',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                controller: _age,
+                hint: 'سنة',
+                keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 24),
               PrimaryButton(

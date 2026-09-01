@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'clients_screen.dart';
-import 'new_package_screen.dart';
+import 'profile_screen.dart';
 import 'summary_screen.dart';
 import 'today_screen.dart';
 
-/// Holds the three tabbed screens and the bottom navigation.
+/// Holds the four tabbed screens and the bottom navigation.
 ///
-/// "باقة جديدة" is a full-screen flow with its own back chevron rather
-/// than a tab, so it is pushed and the current tab stays selected.
+/// Selling a package is not a tab: it always belongs to a specific
+/// client, so it is reached from that client's file or from the
+/// "تجديد" buttons in the summary.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -21,17 +22,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   AppTab _tab = AppTab.today;
 
-  static const _tabScreens = [AppTab.today, AppTab.clients, AppTab.summary];
-
-  void _onSelect(AppTab tab) {
-    if (tab == AppTab.newPackage) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const NewPackageScreen()),
-      );
-      return;
-    }
-    setState(() => _tab = tab);
-  }
+  void _onSelect(AppTab tab) => setState(() => _tab = tab);
 
   @override
   Widget build(BuildContext context) {
@@ -40,11 +31,12 @@ class _HomeShellState extends State<HomeShell> {
       body: SafeArea(
         bottom: false,
         child: IndexedStack(
-          index: _tabScreens.indexOf(_tab),
+          index: AppTab.values.indexOf(_tab),
           children: const [
             TodayScreen(),
             ClientsScreen(),
             SummaryScreen(),
+            ProfileScreen(),
           ],
         ),
       ),

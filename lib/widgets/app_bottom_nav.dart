@@ -9,7 +9,7 @@ enum AppTab {
   today('اليوم'),
   clients('العميلات'),
   summary('الملخص'),
-  newPackage('باقة جديدة');
+  profile('حسابي');
 
   const AppTab(this.label);
   final String label;
@@ -27,7 +27,7 @@ class AppBottomNav extends StatelessWidget {
     AppTab.today: AppIcons.calendar,
     AppTab.clients: AppIcons.person,
     AppTab.summary: AppIcons.bars,
-    AppTab.newPackage: AppIcons.plus,
+    AppTab.profile: AppIcons.profile,
   };
 
   @override

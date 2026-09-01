@@ -15,7 +15,6 @@ class AppStore extends ChangeNotifier {
     _clients = [...data.clients];
     _packages = [...data.packages];
     _visits = [...data.visits];
-    _weightLogs = [...data.weightLogs];
   }
 
   /// The package shapes offered on the "باقة جديدة" screen.
@@ -27,7 +26,6 @@ class AppStore extends ChangeNotifier {
   late List<Client> _clients;
   late List<ClientPackage> _packages;
   late List<Visit> _visits;
-  late List<WeightLog> _weightLogs;
 
   int _idCounter = 0;
   String _nextId(String prefix) => '$prefix-gen-${++_idCounter}';
@@ -118,31 +116,6 @@ class AppStore extends ChangeNotifier {
     final pending = all.where((v) => !v.isResolved).toList();
     final resolved = all.where((v) => v.isResolved).toList();
     return [...pending, ...resolved];
-  }
-
-  // ── Weight ───────────────────────────────────────────────────────────
-
-  /// A client's weight logs, oldest first.
-  List<WeightLog> weightsFor(String clientId) =>
-      _weightLogs.where((w) => w.clientId == clientId).toList()
-        ..sort((a, b) => a.date.compareTo(b.date));
-
-  double? currentWeight(String clientId) {
-    final logs = weightsFor(clientId);
-    return logs.isEmpty ? null : logs.last.weightKg;
-  }
-
-  double? startWeight(String clientId) {
-    final logs = weightsFor(clientId);
-    return logs.isEmpty ? null : logs.first.weightKg;
-  }
-
-  /// Change since the first log — negative means weight lost.
-  double? weightDelta(String clientId) {
-    final start = startWeight(clientId);
-    final current = currentWeight(clientId);
-    if (start == null || current == null) return null;
-    return current - start;
   }
 
   // ── Money ────────────────────────────────────────────────────────────
@@ -357,8 +330,6 @@ class AppStore extends ChangeNotifier {
     required String name,
     required String phone,
     required int age,
-    double? goalKg,
-    double? startWeightKg,
   }) {
     final client = Client(
       id: _nextId('client'),
@@ -366,12 +337,8 @@ class AppStore extends ChangeNotifier {
       phone: phone,
       age: age,
       startDate: now,
-      goalKg: goalKg,
     );
     _clients.add(client);
-    if (startWeightKg != null) {
-      _weightLogs.add(WeightLog(clientId: client.id, date: now, weightKg: startWeightKg));
-    }
     notifyListeners();
     return client;
   }
@@ -388,13 +355,6 @@ class AppStore extends ChangeNotifier {
       index: existing.length + 1,
       scheduledAt: at,
     ));
-    notifyListeners();
-  }
-
-  void logWeight({required String clientId, required double weightKg, DateTime? date}) {
-    _weightLogs.add(
-      WeightLog(clientId: clientId, date: date ?? now, weightKg: weightKg),
-    );
     notifyListeners();
   }
 }

@@ -9,7 +9,7 @@ Material 3, from the design canvas and implementation spec.
 ```sh
 flutter pub get
 flutter run           # a connected device or emulator
-flutter test          # 40 unit and widget tests
+flutter test          # 45 unit and widget tests
 flutter analyze
 ```
 
@@ -17,25 +17,31 @@ Requires the Flutter stable channel (Dart SDK `^3.9.0`) and the Android
 SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 `minSdk` 24, `targetSdk` 36, application id `com.taghdiya.taghdiya`.
 
-## The nine screens
+## The screens
 
-| # | Screen | Code |
-|---|---|---|
-| 01 | اليوم — today's visits | `lib/screens/today_screen.dart` |
-| 02 | العميلات — client list | `lib/screens/clients_screen.dart` |
-| 03 | ملف العميلة — client file | `lib/screens/client_detail_screen.dart` |
-| 04 | باقة جديدة — sell a package | `lib/screens/new_package_screen.dart` |
-| 05 | الملخص — dashboard | `lib/screens/summary_screen.dart` |
-| 06 | اكتمال الباقة — celebration | `lib/screens/package_complete_screen.dart` |
-| 07 | اليوم، فارغ — empty today | `_TodayEmpty` in `today_screen.dart` |
-| 08 | العميلات، فارغ — empty clients | `_ClientsEmpty` in `clients_screen.dart` |
-| 09 | بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
+| Screen | Code |
+|---|---|
+| أهلاً بعودتك — welcome landing | `lib/screens/welcome_screen.dart` |
+| اليوم — today's visits | `lib/screens/today_screen.dart` |
+| العميلات — client list | `lib/screens/clients_screen.dart` |
+| ملف العميلة — client file | `lib/screens/client_detail_screen.dart` |
+| الملخص — dashboard | `lib/screens/summary_screen.dart` |
+| حسابي — the dietitian's own page | `lib/screens/profile_screen.dart` |
+| باقة جديدة — sell a package | `lib/screens/new_package_screen.dart` |
+| اكتمال الباقة — celebration | `lib/screens/package_complete_screen.dart` |
+| اليوم، فارغ — empty today | `_TodayEmpty` in `today_screen.dart` |
+| العميلات، فارغ — empty clients | `_ClientsEmpty` in `clients_screen.dart` |
+| بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
 
-Screens 01, 02 and 05 are the tabs of `HomeShell`. "باقة جديدة" is the
-fourth item in the bottom navigation but pushes a full-screen flow with
-its own back chevron, as the mockup shows it — the current tab stays
-selected underneath. Screen 06 is a transparent route pushed over Today,
-so the list stays visible behind the scrim.
+The app opens on the welcome screen, which greets the dietitian and says
+what is waiting before handing off to `HomeShell`. The shell's four tabs
+are اليوم, العميلات, الملخص and حسابي.
+
+Selling a package is deliberately not a tab: a package always belongs to
+one client, so it is reached from that client's file (overflow menu) or
+from a "تجديد" button in the summary, both of which pass the client in.
+Screen 06 is a transparent route pushed over Today, so the list stays
+visible behind the scrim.
 
 ## How it is put together
 
@@ -86,6 +92,12 @@ default, and it is one switch away from Western digits: set
 goes through `lib/utils/formatting.dart`, so nothing else has to change —
 there is a test covering both settings.
 
+**No weight tracking.** An earlier version logged weights and charted
+them; that was removed at the client's request, along with the goal
+field, the weight card and the chart on the progress card. If it ever
+comes back it wants a `WeightLog` model and a store list beside the
+existing ones — nothing else was entangled with it.
+
 **The sample roster is anchored to today.** `SampleData` builds its
 dates relative to `DateTime.now()` rather than to the day the mockups were
 drawn, so the app always opens on a plausible day. The six clients named
@@ -98,7 +110,7 @@ data instead of the picture.
 
 ## Sharing the progress card
 
-Screen 09 is a plain widget laid out at its native 412pt width inside a
+The progress card is a plain widget laid out at its native 412pt width inside a
 `RepaintBoundary`. `captureProgressCard()` renders it to PNG bytes at 3×,
 which `ProgressCardScreen` writes to the temp directory and hands to the
 system share sheet via `share_plus`. The card renders identically at any
