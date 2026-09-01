@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's cream surface, so the launch window matches the UI that
+         replaces it instead of flashing white. -->
+    <color name="app_surface">#FBF6F1</color>
+</resources>
