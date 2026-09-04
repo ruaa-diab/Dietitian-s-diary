@@ -456,6 +456,7 @@ class AppTextField extends StatelessWidget {
     this.textAlign = TextAlign.start,
     this.onChanged,
     this.autofocus = false,
+    this.obscureText = false,
   });
 
   final TextEditingController controller;
@@ -465,6 +466,9 @@ class AppTextField extends StatelessWidget {
   final TextAlign textAlign;
   final ValueChanged<String>? onChanged;
   final bool autofocus;
+
+  /// Masks the input, e.g. for a password field.
+  final bool obscureText;
 
   @override
   Widget build(BuildContext context) {
@@ -483,6 +487,7 @@ class AppTextField extends StatelessWidget {
               keyboardType: keyboardType,
               textAlign: textAlign,
               autofocus: autofocus,
+              obscureText: obscureText,
               onChanged: onChanged,
               style: AppText.rowTitleSmall.copyWith(fontWeight: FontWeight.w500),
               decoration: InputDecoration(
