@@ -21,7 +21,7 @@ SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 
 | Screen | Code |
 |---|---|
-| أهلاً بعودتك — welcome landing | `lib/screens/welcome_screen.dart` |
+| أهلاً بعودتك — welcome hub | `lib/screens/welcome_screen.dart` |
 | اليوم — today's visits | `lib/screens/today_screen.dart` |
 | العميلات — client list | `lib/screens/clients_screen.dart` |
 | ملف العميلة — client file | `lib/screens/client_detail_screen.dart` |
@@ -33,9 +33,11 @@ SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 | العميلات، فارغ — empty clients | `_ClientsEmpty` in `clients_screen.dart` |
 | بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
 
-The app opens on the welcome screen, which greets the dietitian and says
-what is waiting before handing off to `HomeShell`. The shell's five tabs
-are اليوم, العميلات, باقة جديدة, الملخص and حسابي.
+The app opens on the welcome screen, which greets the dietitian and offers
+a direct jump into each part of the app — اليوم, العميلات, باقة جديدة,
+الملخص, حسابي — rather than one generic "start" button that always lands
+on today's visits. Each option passes `HomeShell` an `initialTab`, so
+choosing العميلات actually opens on العميلات.
 
 `NewPackageScreen` works two ways. As a tab it starts with no client and
 asks who the package is for — offering whoever just finished a package as

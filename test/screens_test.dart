@@ -464,35 +464,49 @@ void main() {
   });
 
   group('welcome', () {
-    testWidgets('greets Raneen and reports what is waiting', (tester) async {
+    testWidgets('greets Raneen and offers every section', (tester) async {
       final store = await tester.pumpScreen(const WelcomeScreen());
 
       expect(find.text('أهلاً بعودتك'), findsOneWidget);
       expect(find.text('رنين'), findsOneWidget);
       expect(find.text('زيارتان بانتظارك'), findsOneWidget);
-      expect(
-        find.text('${fmtInt(store.needsRenewal.length)} تحتاج تجديد'),
-        findsOneWidget,
-      );
+      expect(find.text('${fmtInt(store.clients.length)} عميلة'), findsOneWidget);
+
+      for (final label in ['اليوم', 'العميلات', 'باقة جديدة', 'الملخص', 'حسابي']) {
+        expect(find.text(label), findsOneWidget);
+      }
     });
 
-    testWidgets('the CTA opens the shell', (tester) async {
-      await tester.pumpScreen(const WelcomeScreen());
-
-      await tester.tap(find.text('ابدئي اليوم'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(HomeShell), findsOneWidget);
-      expect(find.byType(WelcomeScreen), findsNothing);
-    });
-
-    testWidgets('a quiet day says so', (tester) async {
+    testWidgets('a quiet day says so on the اليوم option', (tester) async {
       await tester.pumpScreen(
         const WelcomeScreen(),
         store: AppStore(seed: _emptySeed),
       );
 
-      expect(find.text('لا شيء عاجل اليوم. يوم هادئ.'), findsOneWidget);
+      expect(find.text('لا زيارات اليوم'), findsOneWidget);
+    });
+
+    testWidgets('اليوم opens the shell on that tab', (tester) async {
+      await tester.pumpScreen(const WelcomeScreen());
+
+      await tester.tap(find.text('اليوم'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeShell), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsNothing);
+      // The Today screen's own heading confirms which tab is selected.
+      expect(find.text('٤ زيارات'), findsOneWidget);
+    });
+
+    testWidgets('العميلات opens the shell straight on that tab',
+        (tester) async {
+      await tester.pumpScreen(const WelcomeScreen());
+
+      await tester.tap(find.text('العميلات'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeShell), findsOneWidget);
+      expect(find.text('ابحثي عن عميلة بالاسم'), findsOneWidget);
     });
   });
 }

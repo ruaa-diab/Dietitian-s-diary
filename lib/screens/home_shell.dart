@@ -15,14 +15,19 @@ import 'today_screen.dart';
 /// summary, or the celebration. As a tab it starts with no client and
 /// asks for one first.
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key});
+  const HomeShell({super.key, this.initialTab = AppTab.today});
+
+  /// Which tab opens first — set when arriving from the welcome screen's
+  /// "go straight to X" options, so choosing العميلات there actually
+  /// lands on العميلات instead of always opening on اليوم first.
+  final AppTab initialTab;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> {
-  AppTab _tab = AppTab.today;
+  late AppTab _tab = widget.initialTab;
 
   void _onSelect(AppTab tab) => setState(() => _tab = tab);
 

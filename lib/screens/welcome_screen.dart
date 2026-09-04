@@ -5,12 +5,14 @@ import '../data/store_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
+import '../widgets/app_bottom_nav.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
 import 'home_shell.dart';
 
-/// The landing screen: greets the dietitian by name and tells her what is
-/// waiting before she goes anywhere.
+/// Shown right after logging in: greets her, then offers a direct jump
+/// into each part of the app — a menu, not a single generic "start"
+/// button that always dumps her into today's visits.
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
@@ -19,45 +21,92 @@ class WelcomeScreen extends StatelessWidget {
     final store = StoreScope.of(context);
     final today = DateTime.now();
     final pending = store.todayVisits.where((v) => !v.isResolved).length;
-    final renewals = store.needsRenewal.length;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(ArabicDates.weekdayDayMonth(today), style: AppText.dateHeader),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 84,
-                      height: 84,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppColors.clay,
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                      child: const BrandLeaf(size: 42),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.clay,
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                    const SizedBox(height: 28),
-                    Text('أهلاً بعودتك', style: AppText.bodyLarge),
-                    const SizedBox(height: 4),
-                    Text(PracticeProfile.firstName, style: AppText.screenTitle.copyWith(fontSize: 44)),
-                    const SizedBox(height: 20),
-                    _TodayLine(pending: pending, renewals: renewals),
-                  ],
-                ),
+                    child: const BrandLeaf(size: 30),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('أهلاً بعودتك', style: AppText.bodyLarge),
+                        Text(PracticeProfile.firstName, style: AppText.pageHeadline),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              PrimaryButton(
-                label: 'ابدئي اليوم',
-                onPressed: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute<void>(builder: (_) => const HomeShell()),
+              const SizedBox(height: 28),
+              Expanded(
+                child: ListView(
+                  children: [
+                    _NavOption(
+                      icon: AppIcons.calendar,
+                      color: AppColors.clayDark,
+                      background: AppColors.clayTint,
+                      title: 'اليوم',
+                      subtitle: pending > 0
+                          ? '${ArabicDates.visits(pending)} بانتظارك'
+                          : 'لا زيارات اليوم',
+                      onTap: () => _open(context, AppTab.today),
+                    ),
+                    const SizedBox(height: 12),
+                    _NavOption(
+                      icon: AppIcons.person,
+                      color: AppColors.sageText,
+                      background: AppColors.sageBgAlt,
+                      title: 'العميلات',
+                      subtitle: '${fmtInt(store.clients.length)} عميلة',
+                      onTap: () => _open(context, AppTab.clients),
+                    ),
+                    const SizedBox(height: 12),
+                    _NavOption(
+                      icon: AppIcons.plus,
+                      color: AppColors.honeyText,
+                      background: AppColors.honeyBg,
+                      title: 'باقة جديدة',
+                      subtitle: 'بيع باقة زيارات لعميلة',
+                      onTap: () => _open(context, AppTab.newPackage),
+                    ),
+                    const SizedBox(height: 12),
+                    _NavOption(
+                      icon: AppIcons.bars,
+                      color: AppColors.clayDark,
+                      background: AppColors.dueBg,
+                      title: 'الملخص',
+                      subtitle: 'الإيرادات والأرصدة المستحقة',
+                      onTap: () => _open(context, AppTab.summary),
+                    ),
+                    const SizedBox(height: 12),
+                    _NavOption(
+                      icon: AppIcons.profile,
+                      color: AppColors.textSecondary,
+                      background: AppColors.divider,
+                      title: 'حسابي',
+                      subtitle: 'معلوماتك وإحصاءات الشهر',
+                      onTap: () => _open(context, AppTab.profile),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -66,38 +115,74 @@ class WelcomeScreen extends StatelessWidget {
       ),
     );
   }
+
+  void _open(BuildContext context, AppTab tab) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => HomeShell(initialTab: tab)),
+    );
+  }
 }
 
-/// A one-line brief of what needs attention, so the greeting earns its place.
-class _TodayLine extends StatelessWidget {
-  const _TodayLine({required this.pending, required this.renewals});
+class _NavOption extends StatelessWidget {
+  const _NavOption({
+    required this.icon,
+    required this.color,
+    required this.background,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
 
-  final int pending;
-  final int renewals;
+  final LineIconData icon;
+  final Color color;
+  final Color background;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (pending == 0 && renewals == 0) {
-      return Text('لا شيء عاجل اليوم. يوم هادئ.', style: AppText.bodyLarge);
-    }
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        if (pending > 0)
-          StatusPill.success(
-            '${ArabicDates.visits(pending)} بانتظارك',
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            textStyle: AppText.chip,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(color: Color(0x0D362B2C), blurRadius: 10, offset: Offset(0, 2)),
+            ],
           ),
-        if (renewals > 0)
-          StatusPill.due(
-            '${fmtInt(renewals)} تحتاج تجديد',
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            textStyle: AppText.chip,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                IconTile(
+                  icon: icon,
+                  color: color,
+                  background: background,
+                  size: 52,
+                  radius: 18,
+                  iconSize: 24,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: AppText.listName),
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: AppText.metaSmall),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }
