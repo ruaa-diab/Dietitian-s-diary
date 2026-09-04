@@ -266,17 +266,54 @@ void main() {
   });
 
   group('04 · باقة جديدة', () {
-    testWidgets('preselects the renewal candidate and totals the package',
-        (tester) async {
-      await tester.pumpScreen(const NewPackageScreen());
+    testWidgets('as a tab it asks who the package is for', (tester) async {
+      final store = await tester.pumpScreen(const NewPackageScreen());
 
       expect(find.text('باقة جديدة'), findsOneWidget);
+      expect(find.text('بيع باقة زيارات لإحدى العميلات.'), findsOneWidget);
+      // No client is chosen for her, and the suggestion is labelled.
+      expect(find.text('اختاري العميلة'), findsOneWidget);
+      expect(
+        find.text('مقترحة: ${store.renewalCandidate!.name}'),
+        findsOneWidget,
+      );
       expect(find.text('٤ زيارات'), findsOneWidget);
       expect(find.text('٨ زيارات'), findsOneWidget);
       expect(find.text('٢٥ ₪ للزيارة'), findsOneWidget);
       expect(find.text('مدفوع كامل'), findsOneWidget);
       expect(find.text('الإجمالي'), findsOneWidget);
-      expect(find.text('حفظ الباقة'), findsOneWidget);
+    });
+
+    testWidgets('saving is blocked until a client is chosen', (tester) async {
+      await tester.pumpScreen(const NewPackageScreen());
+
+      final save = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'حفظ الباقة'),
+      );
+      expect(save.onPressed, isNull);
+    });
+
+    testWidgets('taking the suggestion fills the client in', (tester) async {
+      final store = await tester.pumpScreen(const NewPackageScreen());
+      final suggested = store.renewalCandidate!;
+
+      await tester.tap(find.text('مقترحة: ${suggested.name}'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(suggested.name), findsOneWidget);
+      expect(find.text('اختاري العميلة'), findsNothing);
+
+      final save = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'حفظ الباقة'),
+      );
+      expect(save.onPressed, isNotNull);
+    });
+
+    testWidgets('opened for a client it starts on her', (tester) async {
+      await tester.pumpScreen(const NewPackageScreen(clientId: 'c-doaa'));
+
+      expect(find.text('دعاء شاهين'), findsOneWidget);
+      expect(find.text('اختاري العميلة'), findsNothing);
     });
 
     testWidgets('picking the eight-visit package updates the total',
@@ -302,6 +339,25 @@ void main() {
 
       expect(store.packagesFor('c-doaa').length, before + 1);
       expect(store.activePackage('c-doaa'), isNotNull);
+    });
+
+    testWidgets('saving from the tab clears the form and hands back',
+        (tester) async {
+      final store = AppStore();
+      var handedBack = false;
+      await tester.pumpScreen(
+        NewPackageScreen(onSaved: () => handedBack = true),
+        store: store,
+      );
+
+      await tester.tap(find.text('مقترحة: ${store.renewalCandidate!.name}'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حفظ الباقة'));
+      await tester.pumpAndSettle();
+
+      expect(handedBack, isTrue);
+      // Ready for the next sale rather than holding the last client.
+      expect(find.text('اختاري العميلة'), findsOneWidget);
     });
   });
 
@@ -390,6 +446,20 @@ void main() {
       expect(find.text('٢٤'), findsOneWidget);
       expect(find.text('هذا الشهر'), findsOneWidget);
       expect(find.text('٣٠٠ ₪'), findsOneWidget);
+    });
+  });
+
+  group('shell', () {
+    testWidgets('باقة جديدة is a tab again', (tester) async {
+      await tester.pumpScreen(const HomeShell());
+
+      await tester.tap(find.text('باقة جديدة').last);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NewPackageScreen), findsOneWidget);
+      expect(find.text('اختاري العميلة'), findsOneWidget);
+      // A tab has nothing to go back to, so no back chevron is offered.
+      expect(find.byTooltip('رجوع'), findsNothing);
     });
   });
 

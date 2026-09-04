@@ -9,7 +9,7 @@ Material 3, from the design canvas and implementation spec.
 ```sh
 flutter pub get
 flutter run           # a connected device or emulator
-flutter test          # 45 unit and widget tests
+flutter test          # 50 unit and widget tests
 flutter analyze
 ```
 
@@ -34,14 +34,17 @@ SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 | بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
 
 The app opens on the welcome screen, which greets the dietitian and says
-what is waiting before handing off to `HomeShell`. The shell's four tabs
-are اليوم, العميلات, الملخص and حسابي.
+what is waiting before handing off to `HomeShell`. The shell's five tabs
+are اليوم, العميلات, باقة جديدة, الملخص and حسابي.
 
-Selling a package is deliberately not a tab: a package always belongs to
-one client, so it is reached from that client's file (overflow menu) or
-from a "تجديد" button in the summary, both of which pass the client in.
-Screen 06 is a transparent route pushed over Today, so the list stays
-visible behind the scrim.
+`NewPackageScreen` works two ways. As a tab it starts with no client and
+asks who the package is for — offering whoever just finished a package as
+a *labelled* suggestion rather than filling her in silently, which read as
+arbitrary. Pushed with a client (from her file, a "تجديد" button, or the
+celebration) it opens on her and shows a back chevron. Saving pops when
+there is a route to pop, and otherwise clears the form and returns the
+shell to today's list. The celebration is a transparent route pushed over
+Today, so the list stays visible behind the scrim.
 
 ## How it is put together
 

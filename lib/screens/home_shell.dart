@@ -3,15 +3,17 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'clients_screen.dart';
+import 'new_package_screen.dart';
 import 'profile_screen.dart';
 import 'summary_screen.dart';
 import 'today_screen.dart';
 
-/// Holds the four tabbed screens and the bottom navigation.
+/// Holds the five tabbed screens and the bottom navigation.
 ///
-/// Selling a package is not a tab: it always belongs to a specific
-/// client, so it is reached from that client's file or from the
-/// "تجديد" buttons in the summary.
+/// باقة جديدة is a tab of its own, and also opens pushed with a client
+/// already chosen — from a client's file, a "تجديد" button in the
+/// summary, or the celebration. As a tab it starts with no client and
+/// asks for one first.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -32,11 +34,14 @@ class _HomeShellState extends State<HomeShell> {
         bottom: false,
         child: IndexedStack(
           index: AppTab.values.indexOf(_tab),
-          children: const [
-            TodayScreen(),
-            ClientsScreen(),
-            SummaryScreen(),
-            ProfileScreen(),
+          children: [
+            const TodayScreen(),
+            const ClientsScreen(),
+            // Saving from the tab has nowhere to pop to, so it hands the
+            // shell back to today's list instead.
+            NewPackageScreen(onSaved: () => setState(() => _tab = AppTab.today)),
+            const SummaryScreen(),
+            const ProfileScreen(),
           ],
         ),
       ),

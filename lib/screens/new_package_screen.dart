@@ -9,15 +9,20 @@ import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
 
-/// Screen 04 — sell a package.
+/// Sell a package — three steps: who it is for, which package, how it
+/// was paid.
 ///
-/// Opens on [clientId] when one is given (renewing from the celebration
-/// screen or a client file), otherwise on whoever most recently finished
-/// a package.
+/// Reached two ways. Pushed with a [clientId] (from a client's file, a
+/// "تجديد" button, or the celebration) it opens on that client. As a
+/// bottom-nav tab it starts empty and asks who the package is for,
+/// rather than silently picking someone — that guess was confusing.
 class NewPackageScreen extends StatefulWidget {
-  const NewPackageScreen({super.key, this.clientId});
+  const NewPackageScreen({super.key, this.clientId, this.onSaved});
 
   final String? clientId;
+
+  /// Called after a save when there is no route to pop — the tab case.
+  final VoidCallback? onSaved;
 
   @override
   State<NewPackageScreen> createState() => _NewPackageScreenState();
@@ -37,8 +42,7 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
     super.didChangeDependencies();
     if (_initialised) return;
     _initialised = true;
-    final store = StoreScope.read(context);
-    _clientId = widget.clientId ?? store.renewalCandidate?.id ?? store.clients.firstOrNull?.id;
+    _clientId = widget.clientId;
     _syncAmount();
   }
 
@@ -70,6 +74,7 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
     if (clientId == null) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     final name = store.client(clientId).name;
     store.sellPackage(
       clientId: clientId,
@@ -78,7 +83,20 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
       amountReceived: _received,
       method: _method,
     );
-    Navigator.of(context).pop();
+
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      // Running as a tab: clear the form so the next sale starts fresh.
+      setState(() {
+        _clientId = null;
+        _option = AppStore.packageOptions.first;
+        _intent = PaymentIntent.paidInFull;
+        _method = PaymentMethod.cash;
+        _syncAmount();
+      });
+      widget.onSaved?.call();
+    }
     messenger.showSnackBar(SnackBar(content: Text('تم حفظ باقة $name')));
   }
 
@@ -97,27 +115,16 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                 children: [
-                  SizedBox(
-                    height: 56,
-                    child: Row(
-                      children: [
-                        IconAction(
-                          icon: AppIcons.chevron,
-                          tooltip: 'رجوع',
-                          onPressed: () => Navigator.of(context).maybePop(),
-                        ),
-                        const SizedBox(width: 6),
-                        Text('باقة جديدة', style: AppText.navTitle),
-                      ],
-                    ),
-                  ),
+                  _Header(canPop: Navigator.of(context).canPop()),
                   const SizedBox(height: 8),
-                  const FieldLabel('العميلة', padding: EdgeInsets.only(top: 14, bottom: 10)),
+                  const _StepLabel(step: 1, label: 'العميلة'),
                   _ClientPicker(
                     client: client,
                     onChange: _pickClient,
+                    suggestion: client == null ? store.renewalCandidate : null,
+                    onAcceptSuggestion: (id) => setState(() => _clientId = id),
                   ),
-                  const FieldLabel('الباقة', padding: EdgeInsets.only(top: 22, bottom: 10)),
+                  const _StepLabel(step: 2, label: 'الباقة'),
                   for (final option in AppStore.packageOptions) ...[
                     _PackageOptionCard(
                       option: option,
@@ -129,7 +136,7 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
                     ),
                     if (option != AppStore.packageOptions.last) const SizedBox(height: 10),
                   ],
-                  const FieldLabel('الدفع', padding: EdgeInsets.only(top: 22, bottom: 10)),
+                  const _StepLabel(step: 3, label: 'الدفع'),
                   SegmentedRow<PaymentIntent>(
                     values: PaymentIntent.values,
                     selected: _intent,
@@ -171,28 +178,134 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
   }
 }
 
+/// Title, plus a back chevron only when there is something to go back
+/// to — as a tab there is not.
+class _Header extends StatelessWidget {
+  const _Header({required this.canPop});
+
+  final bool canPop;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (canPop) ...[
+            IconAction(
+              icon: AppIcons.chevron,
+              tooltip: 'رجوع',
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('باقة جديدة', style: AppText.screenTitle.copyWith(fontSize: 28)),
+                const SizedBox(height: 2),
+                Text('بيع باقة زيارات لإحدى العميلات.', style: AppText.metaSmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A numbered section heading, so the screen reads as three steps.
+class _StepLabel extends StatelessWidget {
+  const _StepLabel({required this.step, required this.label});
+
+  final int step;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 22, bottom: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppColors.clayTint,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              fmtInt(step),
+              style: AppText.pillSmall.copyWith(color: AppColors.clayDark),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(label, style: AppText.fieldLabel),
+        ],
+      ),
+    );
+  }
+}
+
 class _ClientPicker extends StatelessWidget {
-  const _ClientPicker({required this.client, required this.onChange});
+  const _ClientPicker({
+    required this.client,
+    required this.onChange,
+    this.suggestion,
+    this.onAcceptSuggestion,
+  });
 
   final Client? client;
   final VoidCallback onChange;
+
+  /// Whoever most recently finished a package. Offered as a labelled
+  /// shortcut, never selected silently.
+  final Client? suggestion;
+  final ValueChanged<String>? onAcceptSuggestion;
 
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
 
     if (client == null) {
-      return AppCard(
-        shadow: false,
-        radius: 20,
-        border: Border.all(color: AppColors.borderSoft, width: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-        child: Row(
-          children: [
-            Expanded(child: Text('اختاري عميلة', style: AppText.listNameSmall)),
-            TextActionButton(label: 'اختيار', onPressed: onChange),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onChange,
+            child: AppCard(
+              shadow: false,
+              radius: 20,
+              border: Border.all(color: AppColors.border, width: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              child: Row(
+                children: [
+                  IconTile(
+                    icon: AppIcons.person,
+                    color: AppColors.clay,
+                    background: AppColors.dueBg,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text('اختاري العميلة', style: AppText.listNameSmall),
+                  ),
+                  TextActionButton(label: 'اختيار', onPressed: onChange),
+                ],
+              ),
+            ),
+          ),
+          if (suggestion != null) ...[
+            const SizedBox(height: 10),
+            _SuggestionRow(
+              client: suggestion!,
+              onTap: () => onAcceptSuggestion?.call(suggestion!.id),
+            ),
           ],
-        ),
+        ],
       );
     }
 
@@ -233,6 +346,50 @@ class _ClientPicker extends StatelessWidget {
           ),
           TextActionButton(label: 'تغيير', onPressed: onChange),
         ],
+      ),
+    );
+  }
+}
+
+/// "She just finished — renew her?" offered explicitly, so it is obvious
+/// why this name is on screen.
+class _SuggestionRow extends StatelessWidget {
+  const _SuggestionRow({required this.client, required this.onTap});
+
+  final Client client;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.sageBgAlt,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            ClientAvatar(name: client.name, seed: client.id, size: 40, radius: 13),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('مقترحة: ${client.name}', style: AppText.rowTitleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    'أنهت باقتها ولم تجدّد بعد',
+                    style: AppText.metaSmall.copyWith(color: AppColors.sageText),
+                  ),
+                ],
+              ),
+            ),
+            TextActionButton(label: 'اختيار', onPressed: onTap),
+          ],
+        ),
       ),
     );
   }

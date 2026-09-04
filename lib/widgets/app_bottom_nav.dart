@@ -8,6 +8,7 @@ import 'line_icon.dart';
 enum AppTab {
   today('اليوم'),
   clients('العميلات'),
+  newPackage('باقة جديدة'),
   summary('الملخص'),
   profile('حسابي');
 
@@ -26,6 +27,7 @@ class AppBottomNav extends StatelessWidget {
   static final _icons = {
     AppTab.today: AppIcons.calendar,
     AppTab.clients: AppIcons.person,
+    AppTab.newPackage: AppIcons.plus,
     AppTab.summary: AppIcons.bars,
     AppTab.profile: AppIcons.profile,
   };
