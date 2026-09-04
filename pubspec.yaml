@@ -8,20 +8,23 @@ environment:
   sdk: ^3.9.0
 
 dependencies:
+  cloud_firestore: 6.4.0
+  firebase_auth: 6.5.0
+  firebase_core: 4.8.0
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  path: ^1.9.1
   path_provider: ^2.1.5
   share_plus: ^12.0.2
-  sqflite: ^2.4.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  sqflite_common_ffi: ^2.3.7+1
+  fake_cloud_firestore: ^4.1.1
+  firebase_auth_mocks: ^0.15.2
+  mock_exceptions: ^0.8.2
 
 flutter:
   uses-material-design: true

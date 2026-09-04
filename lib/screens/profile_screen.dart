@@ -7,7 +7,6 @@ import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
-import 'login_screen.dart';
 
 /// حسابي — the dietitian's own page: who she is, and how the practice is
 /// doing at a glance.
@@ -103,14 +102,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  /// Clears the whole navigation stack on the way out, so the back
-  /// button can never reveal her data again from behind the login screen.
-  void _logout(BuildContext context) {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
-  }
+  /// AuthGate is listening for exactly this: the moment it fires, it
+  /// disposes this account's store and swaps the whole tree over to
+  /// LoginScreen on its own — nothing to navigate to here.
+  void _logout(BuildContext context) => StoreScope.of(context).signOut();
 }
 
 class _IdentityCard extends StatelessWidget {

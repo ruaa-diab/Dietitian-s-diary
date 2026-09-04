@@ -9,13 +9,29 @@ Material 3, from the design canvas and implementation spec.
 ```sh
 flutter pub get
 flutter run           # a connected device or emulator
-flutter test          # 58 unit and widget tests
+flutter test          # 61 unit and widget tests
 flutter analyze
 ```
 
 Requires the Flutter stable channel (Dart SDK `^3.9.0`) and the Android
 SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 `minSdk` 24, `targetSdk` 36, application id `com.taghdiya.taghdiya`.
+
+**One setup step before it actually connects to anything real:** the app
+talks to Firebase (Firestore + Authentication), and `lib/firebase_options.dart`
+as committed is a placeholder — it compiles, and every test passes against
+it (see [Backend](#backend) below), but it doesn't point at a real
+project yet. Once a Firebase project exists:
+
+```sh
+dart pub global activate flutterfire_cli   # once
+flutterfire configure                       # from the project root
+```
+
+That overwrites `lib/firebase_options.dart` with the real project's
+values; nothing else needs to change. Also paste `firestore.rules` into
+the project's Firestore → Rules tab (or deploy it with the Firebase CLI)
+— without it the database has no access rules at all.
 
 ## The screens
 
@@ -42,26 +58,37 @@ button that always lands on today's visits. Each option passes
 العميلات. Logging out, from حسابي, clears the navigation stack on the
 way to `LoginScreen` so the back button can't reveal her data again.
 
-## Login — current state and what's still ahead
+## Backend
 
-`LoginScreen` validates the form (both fields filled in, the email looks
-like an email) and continues — it does not check the password against
-anything real yet, marked with a `TODO(auth)` at the one line that will
-change. The backend is **Firebase Authentication**, chosen alongside
-Firestore for the sync work already planned — Firestore will replace the
-SQLite layer described below once that migration is built, for the same
-reason: it needs to work across her phone and her laptop, not just one
-device. Firebase Auth is free at this app's scale, no card required, and
-its session persists automatically — log in once, stay logged in across
-closing and reopening the app, same as most apps, until an explicit
-logout.
+Both the account and the data are real Firebase, not a stub — the only
+thing not real yet is *which* Firebase project, since that's created
+through Firebase's own console by whoever owns the account (see
+[Running it](#running-it) above).
 
-Two things this still needs once the Firebase project exists:
-1. Swap the stub in `_LoginScreenState._login` for a real
-   `FirebaseAuth.signInWithEmailAndPassword` call.
-2. On launch, check `FirebaseAuth.instance.authStateChanges()` before
-   showing `LoginScreen` at all, so a returning, already-signed-in session
-   skips straight to the welcome hub.
+- **`FirebaseAuth`** — email/password. `LoginScreen` calls
+  `signInWithEmailAndPassword` for real and maps its error codes to
+  Arabic messages (wrong password, bad email format, too many attempts,
+  offline). There's no self-serve sign-up screen: with exactly one
+  account meant to ever exist, it's created once by hand in the Firebase
+  console (Authentication → Users → Add user), not built as an in-app
+  flow.
+- **`AuthGate`** (`lib/screens/auth_gate.dart`) sits at the very top of
+  the app and owns everything downstream of "who's signed in." It
+  listens to `authStateChanges()` — which is what makes "stay logged in"
+  work: Firebase caches the session on-device, so a relaunch reports the
+  existing user almost immediately and skips `LoginScreen` entirely — and
+  on every change it remounts the whole `MaterialApp` under a
+  `KeyedSubtree` keyed to the account's identity, rather than trying to
+  patch the live route stack in place. That matters: a signed-in
+  screen's `StoreScope` ancestor disappearing while that screen is still
+  finishing a transition out is exactly the kind of "worked in the
+  simple case, crashed the first time a real animation was mid-flight"
+  bug that's easy to ship and a pain to reproduce later — remounting
+  outright avoids the whole class of it, since old widgets are unmounted
+  wholesale rather than rebuilt against an ancestor that just changed.
+- **`Firestore`** — see `Persistence` below. Access is locked down by
+  `firestore.rules`: every document lives under `practices/{uid}/...`,
+  and the rule is simply "only that uid, signed in, may touch it."
 
 `NewPackageScreen` works two ways. As a tab it starts with no client and
 asks who the package is for — offering whoever just finished a package as
@@ -79,44 +106,49 @@ lib/
   theme/        palette, type scale, Material 3 theme
   utils/        Arabic numeral, currency and date formatting
   models/       Client, ClientPackage, Visit, Payment
-  data/         AppStore, its SQLite persistence, the sample roster
+  data/         AppStore, its Firestore persistence, the sample roster
   widgets/      shared components, line icons, the revenue chart
-  screens/      the screens and their sheets
+  screens/      the screens and their sheets, and AuthGate
 ```
 
 `AppStore` is a `ChangeNotifier` published through a small
 `InheritedNotifier` (`StoreScope`). Screens only ever talk to it, never
-to the database or the seed data directly.
+to Firestore or the seed data directly.
 
 ## Persistence
 
-Data lives in an on-device SQLite database (`app_database.dart`, via
-`sqflite`) — closing the app no longer loses anything. `AppStore` has two
-ways to start:
+Real data lives in Firestore, not on the device — that's the point:
+edit on the phone, the change is there on the laptop too, because
+they're both just showing the same account's data live, not two
+separate local copies. `AppStore` has two ways to start:
 
-- `AppStore()` — in-memory only, seeded fresh each time. What tests and
-  the widget-test harness use, so a test run never touches a real
-  database.
-- `AppStore.load()` — what `main()` calls. Opens the database, seeds it
-  from `SampleData` **only if it's empty** (the very first launch), and
-  reads everything back. Every mutation from there writes through in the
-  background: the in-memory state (and the UI) updates immediately, and
-  the write is queued so it lands in the order it happened without
-  blocking on disk.
+- `AppStore()` — in-memory only, seeded fresh each time from
+  `SampleData`. What tests use, so a test run never touches a real
+  network. Nothing here persists or syncs.
+- `AppStore.forUser(firestore, uid)` — what `AuthGate` builds the moment
+  someone signs in. Starts **empty**, deliberately: a real account gets
+  her real clients, not a demo roster of fictional ones she'd have to
+  delete. It opens three live Firestore listeners (`CloudStore.watchClients/
+  watchPackages/watchVisits` in `cloud_store.dart`) and rebuilds the
+  in-memory lists — and calls `notifyListeners()` — every time any of
+  them fires, which happens for a change made on *this* device and one
+  made on any other device signed into the same account alike.
 
-Because the seed only runs once, the six named clients and the rest of
-the generated roster become real, persisted data from the moment the app
-is first opened after this feature — not a fresh demo every launch like
-before. Their "today" freezes on whatever day that first launch happens
-to be, which is expected: once seeded data is really being kept, it
-stops being reseeded to always mean "today," the same as anything else
-you add.
+Every mutation (`markVisit`, `recordPayment`, `sellPackage`, …) updates
+the in-memory lists immediately either way, so the UI never waits on a
+round-trip to feel like it responded; in cloud mode the matching write is
+queued in the same call (`AppStore._persist`), and the live listener
+above reconciles shortly after — visually a no-op when it's just
+confirming your own write, an actual update on screen when it's someone
+else's.
 
-`test/app_database_test.dart` exercises the real database code end to
-end — via `sqflite_common_ffi` rather than the Android platform channel
-sqflite normally uses, so it runs on any machine — proving a client, a
-payment, and a visit marked attended are all still there after closing
-and reopening the store.
+`test/screens_test.dart`'s `login` and `AuthGate` groups exercise the
+real Firestore and Firebase Auth code paths — against
+`fake_cloud_firestore` and `firebase_auth_mocks`, in-memory fakes
+implementing the same client APIs, so no real project or network is
+needed — proving sign-in, sign-out, a fresh account opening empty, and a
+wrong-credentials error message all actually work end to end, not just
+that the screens render.
 
 ## Rendering details
 
@@ -156,15 +188,22 @@ field, the weight card and the chart on the progress card. If it ever
 comes back it wants a `WeightLog` model and a store list beside the
 existing ones — nothing else was entangled with it.
 
-**The sample roster is anchored to today.** `SampleData` builds its
-dates relative to `DateTime.now()` rather than to the day the mockups were
-drawn, so the app always opens on a plausible day. The six clients named
-in the design are seeded by hand to land on the exact states the screens
-show; the rest of the 24-client book is generated so the dashboard's
-revenue trend, unpaid total and renewal count are real sums rather than
-captions. Placeholder figures that could not be made self-consistent
-(a mockup showing "٢ متبقية" beside a visit that implies three) follow the
-data instead of the picture.
+**A real signed-in account starts empty — the sample roster only exists
+for tests and the mockup review, now.** Early on, `SampleData`'s 24
+fictional clients were also what a real launch of the app seeded into
+its (then-local) database, so the app never opened on a blank screen.
+Once persistence became a real account rather than a local file, that
+stopped being appropriate — nobody wants to delete نور خالد and 23 others
+before entering her actual first client. `AppStore.forUser` never seeds
+anything; a fresh account meets the empty-state screens (٧ and ٨) and
+adds real people from there. `SampleData` is still exactly as useful as
+before for what it was actually for: the in-memory `AppStore()` tests
+use, anchored to `DateTime.now()` (not the day the mockups were drawn)
+so a test run always exercises a plausible "today." The six clients
+named in the design are seeded by hand there to land on the exact states
+the screens show; the rest of the 24-client book is generated so the
+dashboard's revenue trend, unpaid total and renewal count are real sums
+rather than captions.
 
 ## Sharing the progress card
 

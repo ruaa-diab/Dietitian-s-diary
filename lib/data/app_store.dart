@@ -1,66 +1,46 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:sqflite/sqflite.dart';
 
 import '../models/models.dart';
 import '../utils/formatting.dart';
-import 'app_database.dart';
+import 'cloud_store.dart';
 import 'sample_data.dart';
 
 /// Application state, held in memory and — outside of tests — mirrored
-/// to an on-device SQLite database so it survives closing the app.
+/// to Firestore so it survives closing the app and stays the same across
+/// every device signed in to the same account.
 ///
 /// Everything the UI shows is derived from these three lists; screens
-/// only ever talk to this class, never to [AppDatabase] or [SampleData]
-/// directly, so persistence lives entirely in this file.
+/// only ever talk to this class, never to [CloudStore] or [SampleData]
+/// directly, so persistence and sync live entirely in this file.
 class AppStore extends ChangeNotifier {
-  /// In-memory only — no database, nothing persists. Used by tests and by
-  /// anything that wants a disposable, deterministic store.
-  AppStore({SampleSeed? seed}) : _db = null {
+  /// In-memory only — no cloud, nothing persists or syncs. Used by tests
+  /// and by anything that wants a disposable, deterministic store.
+  AppStore({SampleSeed? seed})
+      : _cloud = null,
+        _auth = null {
     final data = seed ?? SampleData.build();
     _clients = [...data.clients];
     _packages = [...data.packages];
     _visits = [...data.visits];
   }
 
-  AppStore._withDatabase({
-    required Database db,
-    required List<Client> clients,
-    required List<ClientPackage> packages,
-    required List<Visit> visits,
-  }) : _db = db {
-    _clients = clients;
-    _packages = packages;
-    _visits = visits;
+  /// Backed by Firestore, scoped to one signed-in account. Starts empty
+  /// — a real account gets her real data, not the sample roster — and
+  /// fills in as soon as the first snapshot arrives from whichever
+  /// device(s) she's already used. [auth] is only kept so [signOut] has
+  /// something to call — this store never checks who's signed in itself.
+  AppStore.forUser(FirebaseFirestore firestore, String uid, {FirebaseAuth? auth})
+      : _cloud = CloudStore(firestore, uid),
+        _auth = auth {
+    _clients = [];
+    _packages = [];
+    _visits = [];
+    _subscribeToCloud();
   }
-
-  /// Opens the on-device database, seeding it once on the very first
-  /// launch, and loads the store from it. Every mutation from here on
-  /// writes through, so data survives closing the app.
-  static Future<AppStore> load({String? databasePath}) async {
-    final db = await AppDatabase.open(path: databasePath);
-    if (await AppDatabase.isEmpty(db)) {
-      final seed = SampleData.build();
-      await AppDatabase.seed(
-        db,
-        clients: seed.clients,
-        packages: seed.packages,
-        visits: seed.visits,
-      );
-    }
-    final data = await AppDatabase.readAll(db);
-    return AppStore._withDatabase(
-      db: db,
-      clients: data.clients,
-      packages: data.packages,
-      visits: data.visits,
-    );
-  }
-
-  /// Null in tests and other in-memory-only instances; writes are skipped
-  /// wherever this is null rather than persisted.
-  final Database? _db;
 
   /// The package shapes offered on the "باقة جديدة" screen.
   static const packageOptions = <PackageOption>[
@@ -68,51 +48,88 @@ class AppStore extends ChangeNotifier {
     PackageOption(visitCount: 8, price: 190),
   ];
 
+  /// Null in tests and other in-memory-only instances; writes and the
+  /// live subscriptions are skipped wherever this is null.
+  final CloudStore? _cloud;
+
+  final FirebaseAuth? _auth;
+
+  /// A no-op in tests, where there's no account to sign out of. AuthGate
+  /// is listening for the resulting auth-state change and takes it from
+  /// there — this store doesn't navigate anywhere itself.
+  void signOut() => _auth?.signOut();
+
+  StreamSubscription<List<Client>>? _clientsSub;
+  StreamSubscription<List<ClientPackage>>? _packagesSub;
+  StreamSubscription<List<Visit>>? _visitsSub;
+
+  /// Listens for changes from Firestore — including ones made on another
+  /// device — and folds them into the same lists the UI already reads.
+  /// A write this store makes itself also arrives back through here,
+  /// almost instantly, from Firestore's local cache; that's expected and
+  /// harmless, not a special case to guard against.
+  void _subscribeToCloud() {
+    final cloud = _cloud!;
+    _clientsSub = cloud.watchClients().listen((clients) {
+      _clients = clients;
+      notifyListeners();
+    }, onError: _logError);
+    _packagesSub = cloud.watchPackages().listen((packages) {
+      _packages = packages;
+      notifyListeners();
+    }, onError: _logError);
+    _visitsSub = cloud.watchVisits().listen((visits) {
+      _visits = visits;
+      notifyListeners();
+    }, onError: _logError);
+  }
+
+  static void _logError(Object error) {
+    debugPrint('AppStore: sync error: $error');
+  }
+
   late List<Client> _clients;
   late List<ClientPackage> _packages;
   late List<Visit> _visits;
 
   int _idCounter = 0;
 
-  /// Stamped with the current time so ids stay unique across restarts —
+  /// Stamped with the current time so ids stay unique across sessions —
   /// a plain counter would restart at 0 each launch and collide with ids
-  /// already written to the database in an earlier session.
+  /// already written in an earlier session.
   String _nextId(String prefix) =>
       '$prefix-${DateTime.now().microsecondsSinceEpoch}-${++_idCounter}';
 
-  /// Chains database writes so they land in the order the mutations
-  /// happened — a mutation like [markVisit] can issue two in a row (the
-  /// visit, then the package it closes), and running them out of order
-  /// or concurrently against sqflite is not something to risk.
+  /// Chains cloud writes so they land in the order the mutations
+  /// happened. Errors are logged rather than surfaced — the optimistic
+  /// local state (and the UI) is already correct either way, and the
+  /// live listener above will reconcile with whatever Firestore actually
+  /// ends up holding.
   Future<void> _pendingWrites = Future<void>.value();
 
-  /// Queues a database write when this store is backed by one; a no-op
-  /// for the in-memory-only stores tests use. Errors are logged rather
-  /// than surfaced — the in-memory state (and the UI) is already correct
-  /// either way, so a failed write means this one change won't survive a
-  /// restart, not that the action failed.
-  void _persist(Future<void> Function(Database db) write) {
-    final db = _db;
-    if (db == null) return;
+  void _persist(Future<void> Function(CloudStore cloud) write) {
+    final cloud = _cloud;
+    if (cloud == null) return;
     _pendingWrites = _pendingWrites.then((_) async {
       try {
-        await write(db);
+        await write(cloud);
       } catch (error) {
-        debugPrint('AppStore: failed to persist a change: $error');
+        _logError(error);
       }
     });
   }
 
   /// Waits for every write issued so far to finish. Production never
   /// awaits this — the UI never blocks on a write — but it gives tests a
-  /// real point to synchronize on instead of a guessed delay before
-  /// closing the database.
+  /// real point to synchronize on.
   @visibleForTesting
   Future<void> flushPersistence() => _pendingWrites;
 
   @override
   void dispose() {
-    _db?.close();
+    _clientsSub?.cancel();
+    _packagesSub?.cancel();
+    _visitsSub?.cancel();
     super.dispose();
   }
 
@@ -212,11 +229,11 @@ class AppStore extends ChangeNotifier {
         ..sort((a, b) => b.startDate.compareTo(a.startDate));
 
   double get totalOutstanding =>
-      outstandingPackages.fold(0.0, (sum, p) => sum + p.balanceDue);
+      outstandingPackages.fold(0.0, (total, p) => total + p.balanceDue);
 
   double balanceDueFor(String clientId) => _packages
       .where((p) => p.clientId == clientId)
-      .fold(0.0, (sum, p) => sum + p.balanceDue);
+      .fold(0.0, (total, p) => total + p.balanceDue);
 
   double revenueForMonth(DateTime month) {
     var total = 0.0;
@@ -296,6 +313,13 @@ class AppStore extends ChangeNotifier {
   int countFor(ClientFilter filter) => searchClients('', filter).length;
 
   // ── Mutations ────────────────────────────────────────────────────────
+  //
+  // Every mutation updates the in-memory lists immediately, the same way
+  // regardless of whether this store is cloud-backed, so the UI never
+  // waits on a network round-trip to feel like it responded. In cloud
+  // mode the matching write is also queued; the live listener above will
+  // confirm it (or, rarely, correct it) once Firestore's own local cache
+  // reflects the change — visually a no-op, since it's the same data.
 
   /// Records a visit outcome. Completing the last visit of a package
   /// closes the package and queues the celebration.
@@ -304,16 +328,17 @@ class AppStore extends ChangeNotifier {
     if (index < 0) return;
     final visit = _visits[index];
     _visits[index] = visit.copyWith(status: status);
-    _persist((db) => AppDatabase.updateVisit(db, _visits[index]));
 
+    ClientPackage? closedPackage;
     if (isPackageComplete(visit.packageId)) {
       final pkgIndex = _packages.indexWhere((p) => p.id == visit.packageId);
       if (pkgIndex >= 0 && _packages[pkgIndex].isActive) {
         _packages[pkgIndex] = _packages[pkgIndex].copyWith(endDate: now);
         pendingCelebration = _packages[pkgIndex];
-        _persist((db) => AppDatabase.updatePackage(db, _packages[pkgIndex]));
+        closedPackage = _packages[pkgIndex];
       }
     }
+    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], closedPackage));
     notifyListeners();
   }
 
@@ -324,13 +349,14 @@ class AppStore extends ChangeNotifier {
     if (index < 0) return;
     final visit = _visits[index];
     _visits[index] = visit.copyWith(status: VisitStatus.scheduled);
-    _persist((db) => AppDatabase.updateVisit(db, _visits[index]));
 
+    ClientPackage? reopenedPackage;
     final pkgIndex = _packages.indexWhere((p) => p.id == visit.packageId);
     if (pkgIndex >= 0 && !_packages[pkgIndex].isActive) {
       _packages[pkgIndex] = _packages[pkgIndex].copyWith(clearEndDate: true);
-      _persist((db) => AppDatabase.updatePackage(db, _packages[pkgIndex]));
+      reopenedPackage = _packages[pkgIndex];
     }
+    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], reopenedPackage));
     if (pendingCelebration?.id == visit.packageId) pendingCelebration = null;
     notifyListeners();
   }
@@ -358,7 +384,7 @@ class AppStore extends ChangeNotifier {
       date: date ?? now,
     );
     _packages[index] = pkg.copyWith(payments: [...pkg.payments, payment]);
-    _persist((db) => AppDatabase.insertPayment(db, payment));
+    _persist((cloud) => cloud.updatePackage(_packages[index]));
     notifyListeners();
   }
 
@@ -399,7 +425,7 @@ class AppStore extends ChangeNotifier {
       payments: payments,
     );
     _packages.add(pkg);
-    _persist((db) => AppDatabase.insertPackage(db, pkg));
+    _persist((cloud) => cloud.insertPackage(pkg));
 
     final newVisits = <Visit>[];
     for (var i = 0; i < option.visitCount; i++) {
@@ -413,7 +439,7 @@ class AppStore extends ChangeNotifier {
       ));
     }
     _visits.addAll(newVisits);
-    _persist((db) => AppDatabase.insertVisits(db, newVisits));
+    _persist((cloud) => cloud.insertVisits(newVisits));
 
     notifyListeners();
     return pkg;
@@ -432,7 +458,7 @@ class AppStore extends ChangeNotifier {
       startDate: now,
     );
     _clients.add(client);
-    _persist((db) => AppDatabase.insertClient(db, client));
+    _persist((cloud) => cloud.insertClient(client));
     notifyListeners();
     return client;
   }
@@ -450,7 +476,7 @@ class AppStore extends ChangeNotifier {
       scheduledAt: at,
     );
     _visits.add(visit);
-    _persist((db) => AppDatabase.insertVisit(db, visit));
+    _persist((cloud) => cloud.insertVisit(visit));
     notifyListeners();
   }
 }

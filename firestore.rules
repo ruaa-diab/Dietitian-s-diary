@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// Everything the app reads and writes lives under practices/{uid}/...
+// (clients, packages, visits — see lib/data/cloud_store.dart). This is
+// the one rule that matters: only the signed-in account whose uid
+// matches the path may touch it. Nobody else — not another signed-in
+// user, not a stranger who finds the project's public config — can read
+// or write another account's data.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /practices/{uid}/{collection}/{docId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

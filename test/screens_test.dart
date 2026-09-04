@@ -1,17 +1,22 @@
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mock_exceptions/mock_exceptions.dart';
 import 'package:taghdiya/data/app_store.dart';
 import 'package:taghdiya/data/sample_data.dart';
 import 'package:taghdiya/main.dart';
+import 'package:taghdiya/models/models.dart';
+import 'package:taghdiya/screens/auth_gate.dart';
+import 'package:taghdiya/screens/client_detail_screen.dart';
 import 'package:taghdiya/screens/home_shell.dart';
 import 'package:taghdiya/screens/login_screen.dart';
-import 'package:taghdiya/models/models.dart';
-import 'package:taghdiya/screens/client_detail_screen.dart';
 import 'package:taghdiya/screens/new_client_sheet.dart';
-import 'package:taghdiya/screens/welcome_screen.dart';
-import 'package:taghdiya/utils/formatting.dart';
 import 'package:taghdiya/screens/new_package_screen.dart';
 import 'package:taghdiya/screens/package_complete_screen.dart';
+import 'package:taghdiya/screens/welcome_screen.dart';
+import 'package:taghdiya/utils/formatting.dart';
 import 'package:taghdiya/widgets/app_bottom_nav.dart';
 import 'package:taghdiya/widgets/progress_card.dart';
 
@@ -449,19 +454,12 @@ void main() {
       expect(find.text('٣٠٠ ₪'), findsOneWidget);
     });
 
-    testWidgets('logging out returns to the login screen with nothing to pop back to',
-        (tester) async {
-      await tester.pumpScreen(const HomeShell());
-      await tester.tap(find.text('حسابي').last);
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('تسجيل الخروج'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(LoginScreen), findsOneWidget);
-      expect(find.byType(HomeShell), findsNothing);
-      expect(Navigator.of(tester.element(find.byType(LoginScreen))).canPop(), isFalse);
-    });
+    // Signing out for real — AuthGate reacting to an actual auth-state
+    // change and replacing the whole screen — is covered under the
+    // AuthGate group below. A plain in-memory AppStore(), which is all
+    // pumpScreen's harness gives ProfileScreen here, has no FirebaseAuth
+    // of its own to sign out of, so tapping تسجيل الخروج is correctly a
+    // no-op in that setup, not something to assert navigation on.
   });
 
   group('shell', () {
@@ -479,8 +477,11 @@ void main() {
   });
 
   group('login', () {
+    // LoginScreen reads FirebaseAuth.instance the moment it's constructed
+    // if no auth is supplied, and that singleton has no real project to
+    // talk to in a test environment — every test here supplies a mock.
     testWidgets('greets Raneen with the credential form', (tester) async {
-      await tester.pumpScreen(const LoginScreen());
+      await tester.pumpScreen(LoginScreen(auth: MockFirebaseAuth()));
 
       expect(find.text('أهلاً بعودتك'), findsOneWidget);
       expect(find.text('رنين'), findsOneWidget);
@@ -489,18 +490,20 @@ void main() {
       expect(find.text('تسجيل الدخول'), findsOneWidget);
     });
 
-    testWidgets('rejects empty fields', (tester) async {
-      await tester.pumpScreen(const LoginScreen());
+    testWidgets('rejects empty fields without calling Firebase at all',
+        (tester) async {
+      final auth = MockFirebaseAuth();
+      await tester.pumpScreen(LoginScreen(auth: auth));
 
       await tester.tap(find.text('تسجيل الدخول'));
       await tester.pumpAndSettle();
 
       expect(find.text('أدخلي البريد الإلكتروني وكلمة المرور.'), findsOneWidget);
-      expect(find.byType(WelcomeScreen), findsNothing);
+      expect(auth.currentUser, isNull);
     });
 
     testWidgets('rejects a malformed email', (tester) async {
-      await tester.pumpScreen(const LoginScreen());
+      await tester.pumpScreen(LoginScreen(auth: MockFirebaseAuth()));
 
       final fields = find.byType(TextField);
       await tester.enterText(fields.at(0), 'not-an-email');
@@ -511,9 +514,11 @@ void main() {
       expect(find.text('تحققي من صيغة البريد الإلكتروني.'), findsOneWidget);
     });
 
-    testWidgets('valid credentials continue to the welcome hub',
-        (tester) async {
-      await tester.pumpScreen(const LoginScreen());
+    testWidgets('valid credentials sign her in', (tester) async {
+      final auth = MockFirebaseAuth(
+        mockUser: MockUser(uid: 'raneen-uid', email: 'raneen@example.com'),
+      );
+      await tester.pumpScreen(LoginScreen(auth: auth));
 
       final fields = find.byType(TextField);
       await tester.enterText(fields.at(0), 'raneen@example.com');
@@ -521,12 +526,32 @@ void main() {
       await tester.tap(find.text('تسجيل الدخول'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(WelcomeScreen), findsOneWidget);
-      expect(find.byType(LoginScreen), findsNothing);
+      // LoginScreen doesn't navigate itself — AuthGate does, tested
+      // separately — but it must have actually signed her in.
+      expect(auth.currentUser?.uid, 'raneen-uid');
+      expect(find.textContaining('تعذّر'), findsNothing);
+    });
+
+    testWidgets('shows a friendly message for wrong credentials',
+        (tester) async {
+      final auth = MockFirebaseAuth();
+      whenCalling(Invocation.method(#signInWithEmailAndPassword, null))
+          .on(auth)
+          .thenThrow(FirebaseAuthException(code: 'invalid-credential'));
+      await tester.pumpScreen(LoginScreen(auth: auth));
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'raneen@example.com');
+      await tester.enterText(fields.at(1), 'wrong');
+      await tester.tap(find.text('تسجيل الدخول'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('البريد الإلكتروني أو كلمة المرور غير صحيحة.'), findsOneWidget);
+      expect(auth.currentUser, isNull);
     });
 
     testWidgets('typing again clears a shown error', (tester) async {
-      await tester.pumpScreen(const LoginScreen());
+      await tester.pumpScreen(LoginScreen(auth: MockFirebaseAuth()));
 
       await tester.tap(find.text('تسجيل الدخول'));
       await tester.pumpAndSettle();
@@ -536,6 +561,72 @@ void main() {
       await tester.pump();
 
       expect(find.text('أدخلي البريد الإلكتروني وكلمة المرور.'), findsNothing);
+    });
+  });
+
+  group('AuthGate', () {
+    // AuthGate builds its own MaterialApp rather than going through
+    // pumpScreen's helper, so the reference-frame size is set by hand —
+    // otherwise a screen taller than the default test surface (حسابي's
+    // included) never gets its lower widgets built into the tree at
+    // all, sliver viewport culling being what it is.
+    Future<void> pumpSized(WidgetTester tester, Widget widget) async {
+      tester.view.physicalSize = _frame;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(widget);
+    }
+
+    testWidgets('signed out shows the login screen', (tester) async {
+      final auth = MockFirebaseAuth();
+      await pumpSized(tester, AuthGate(auth: auth, firestore: FakeFirebaseFirestore()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LoginScreen), findsOneWidget);
+    });
+
+    testWidgets('an already-signed-in session skips straight past login',
+        (tester) async {
+      final auth = MockFirebaseAuth(
+        signedIn: true,
+        mockUser: MockUser(uid: 'raneen-uid', email: 'raneen@example.com'),
+      );
+      await pumpSized(tester, AuthGate(auth: auth, firestore: FakeFirebaseFirestore()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LoginScreen), findsNothing);
+      expect(find.byType(WelcomeScreen), findsOneWidget);
+    });
+
+    testWidgets('a fresh account opens on the empty state, not sample data',
+        (tester) async {
+      final auth = MockFirebaseAuth(
+        signedIn: true,
+        mockUser: MockUser(uid: 'raneen-uid', email: 'raneen@example.com'),
+      );
+      await pumpSized(tester, AuthGate(auth: auth, firestore: FakeFirebaseFirestore()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('لا زيارات اليوم'), findsOneWidget);
+    });
+
+    testWidgets('signing out from حسابي returns to the login screen',
+        (tester) async {
+      final auth = MockFirebaseAuth(
+        signedIn: true,
+        mockUser: MockUser(uid: 'raneen-uid', email: 'raneen@example.com'),
+      );
+      await pumpSized(tester, AuthGate(auth: auth, firestore: FakeFirebaseFirestore()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حسابي'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('تسجيل الخروج'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(auth.currentUser, isNull);
     });
   });
 

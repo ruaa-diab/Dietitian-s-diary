@@ -36,15 +36,27 @@ class PackageCompleteScreen extends StatefulWidget {
 
 class _PackageCompleteScreenState extends State<PackageCompleteScreen>
     with TickerProviderStateMixin {
-  late final _pop = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 500),
-  )..forward();
+  // Built eagerly in initState, not as lazy `late final` fields: a lazy
+  // initializer that has never been read fires on first access, and if
+  // that first access were dispose() itself (the widget torn down before
+  // its first build), creating a new AnimationController's Ticker then
+  // crashes — it needs a live element to look up, which disposal doesn't
+  // have.
+  late final AnimationController _pop;
+  late final AnimationController _float;
 
-  late final _float = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 3400),
-  )..repeat(reverse: true);
+  @override
+  void initState() {
+    super.initState();
+    _pop = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    )..forward();
+    _float = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3400),
+    )..repeat(reverse: true);
+  }
 
   @override
   void dispose() {
