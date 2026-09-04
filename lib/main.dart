@@ -8,7 +8,7 @@ import 'screens/welcome_screen.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -16,7 +16,11 @@ void main() {
     systemNavigationBarColor: AppColors.card,
     systemNavigationBarIconBrightness: Brightness.dark,
   ));
-  runApp(TaghdiyaApp(store: AppStore()));
+  // Opens the on-device database (seeding it on the very first launch)
+  // before the first frame, so the app never shows a store that is about
+  // to be replaced once loading finishes.
+  final store = await AppStore.load();
+  runApp(TaghdiyaApp(store: store));
 }
 
 class TaghdiyaApp extends StatelessWidget {

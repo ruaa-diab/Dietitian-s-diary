@@ -9,7 +9,7 @@ Material 3, from the design canvas and implementation spec.
 ```sh
 flutter pub get
 flutter run           # a connected device or emulator
-flutter test          # 50 unit and widget tests
+flutter test          # 58 unit and widget tests
 flutter analyze
 ```
 
@@ -52,27 +52,56 @@ Today, so the list stays visible behind the scrim.
 lib/
   theme/        palette, type scale, Material 3 theme
   utils/        Arabic numeral, currency and date formatting
-  models/       Client, ClientPackage, Visit, Payment, WeightLog
-  data/         AppStore (in-memory state) + the sample roster
-  widgets/      shared components, line icons, charts, illustrations
-  screens/      the nine screens and their sheets
+  models/       Client, ClientPackage, Visit, Payment
+  data/         AppStore, its SQLite persistence, the sample roster
+  widgets/      shared components, line icons, the revenue chart
+  screens/      the screens and their sheets
 ```
 
 `AppStore` is a `ChangeNotifier` published through a small
-`InheritedNotifier` (`StoreScope`). Screens never touch the seed data
-directly, so pointing the app at a real database means replacing
-`SampleData` and the mutation methods on the store — nothing else.
+`InheritedNotifier` (`StoreScope`). Screens only ever talk to it, never
+to the database or the seed data directly.
 
-Charts are hand-rolled `CustomPainter`s (`weight_chart.dart`,
-`revenue_bars.dart`), and the icons are stroke paths on a 24-unit grid
-(`line_icon.dart`) transcribed from the design's SVGs, so there is no
-chart or icon-font dependency.
+## Persistence
+
+Data lives in an on-device SQLite database (`app_database.dart`, via
+`sqflite`) — closing the app no longer loses anything. `AppStore` has two
+ways to start:
+
+- `AppStore()` — in-memory only, seeded fresh each time. What tests and
+  the widget-test harness use, so a test run never touches a real
+  database.
+- `AppStore.load()` — what `main()` calls. Opens the database, seeds it
+  from `SampleData` **only if it's empty** (the very first launch), and
+  reads everything back. Every mutation from there writes through in the
+  background: the in-memory state (and the UI) updates immediately, and
+  the write is queued so it lands in the order it happened without
+  blocking on disk.
+
+Because the seed only runs once, the six named clients and the rest of
+the generated roster become real, persisted data from the moment the app
+is first opened after this feature — not a fresh demo every launch like
+before. Their "today" freezes on whatever day that first launch happens
+to be, which is expected: once seeded data is really being kept, it
+stops being reseeded to always mean "today," the same as anything else
+you add.
+
+`test/app_database_test.dart` exercises the real database code end to
+end — via `sqflite_common_ffi` rather than the Android platform channel
+sqflite normally uses, so it runs on any machine — proving a client, a
+payment, and a visit marked attended are all still there after closing
+and reopening the store.
+
+## Rendering details
+
+Charts are hand-rolled `CustomPainter`s (`revenue_bars.dart`), and the
+icons are stroke paths on a 24-unit grid (`line_icon.dart`) transcribed
+from the design's SVGs, so there is no chart or icon-font dependency.
 
 RTL is applied as a `Directionality` wrapper in `MaterialApp.builder`, so
 the whole layout mirrors — nav bar, rows, chevrons — not just text
-alignment. The two places that stay left-to-right on purpose are the
-weight chart (time runs left to right, oldest reading first, matching the
-design) and the confetti coordinates.
+alignment. The confetti on the celebration screen stays in plain
+left-to-right coordinates, since it is just scattered shapes.
 
 ## Design values
 
