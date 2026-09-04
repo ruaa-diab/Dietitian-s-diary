@@ -7,6 +7,7 @@ import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
+import 'login_screen.dart';
 
 /// حسابي — the dietitian's own page: who she is, and how the practice is
 /// doing at a glance.
@@ -93,7 +94,21 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 14),
+        SecondaryButton(
+          label: 'تسجيل الخروج',
+          onPressed: () => _logout(context),
+        ),
       ],
+    );
+  }
+
+  /// Clears the whole navigation stack on the way out, so the back
+  /// button can never reveal her data again from behind the login screen.
+  void _logout(BuildContext context) {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (route) => false,
     );
   }
 }

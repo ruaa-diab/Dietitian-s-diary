@@ -21,6 +21,7 @@ SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 
 | Screen | Code |
 |---|---|
+| تسجيل الدخول — login | `lib/screens/login_screen.dart` |
 | أهلاً بعودتك — welcome hub | `lib/screens/welcome_screen.dart` |
 | اليوم — today's visits | `lib/screens/today_screen.dart` |
 | العميلات — client list | `lib/screens/clients_screen.dart` |
@@ -33,11 +34,34 @@ SDK. The Android module is stock `flutter create` output: `compileSdk` 36,
 | العميلات، فارغ — empty clients | `_ClientsEmpty` in `clients_screen.dart` |
 | بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
 
-The app opens on the welcome screen, which greets the dietitian and offers
-a direct jump into each part of the app — اليوم, العميلات, باقة جديدة,
-الملخص, حسابي — rather than one generic "start" button that always lands
-on today's visits. Each option passes `HomeShell` an `initialTab`, so
-choosing العميلات actually opens on العميلات.
+The app opens on `LoginScreen`, then the welcome hub, which greets the
+dietitian and offers a direct jump into each part of the app — اليوم,
+العميلات, باقة جديدة, الملخص, حسابي — rather than one generic "start"
+button that always lands on today's visits. Each option passes
+`HomeShell` an `initialTab`, so choosing العميلات actually opens on
+العميلات. Logging out, from حسابي, clears the navigation stack on the
+way to `LoginScreen` so the back button can't reveal her data again.
+
+## Login — current state and what's still ahead
+
+`LoginScreen` validates the form (both fields filled in, the email looks
+like an email) and continues — it does not check the password against
+anything real yet, marked with a `TODO(auth)` at the one line that will
+change. The backend is **Firebase Authentication**, chosen alongside
+Firestore for the sync work already planned — Firestore will replace the
+SQLite layer described below once that migration is built, for the same
+reason: it needs to work across her phone and her laptop, not just one
+device. Firebase Auth is free at this app's scale, no card required, and
+its session persists automatically — log in once, stay logged in across
+closing and reopening the app, same as most apps, until an explicit
+logout.
+
+Two things this still needs once the Firebase project exists:
+1. Swap the stub in `_LoginScreenState._login` for a real
+   `FirebaseAuth.signInWithEmailAndPassword` call.
+2. On launch, check `FirebaseAuth.instance.authStateChanges()` before
+   showing `LoginScreen` at all, so a returning, already-signed-in session
+   skips straight to the welcome hub.
 
 `NewPackageScreen` works two ways. As a tab it starts with no client and
 asks who the package is for — offering whoever just finished a package as

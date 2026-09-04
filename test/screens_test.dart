@@ -4,6 +4,7 @@ import 'package:taghdiya/data/app_store.dart';
 import 'package:taghdiya/data/sample_data.dart';
 import 'package:taghdiya/main.dart';
 import 'package:taghdiya/screens/home_shell.dart';
+import 'package:taghdiya/screens/login_screen.dart';
 import 'package:taghdiya/models/models.dart';
 import 'package:taghdiya/screens/client_detail_screen.dart';
 import 'package:taghdiya/screens/new_client_sheet.dart';
@@ -447,6 +448,20 @@ void main() {
       expect(find.text('هذا الشهر'), findsOneWidget);
       expect(find.text('٣٠٠ ₪'), findsOneWidget);
     });
+
+    testWidgets('logging out returns to the login screen with nothing to pop back to',
+        (tester) async {
+      await tester.pumpScreen(const HomeShell());
+      await tester.tap(find.text('حسابي').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('تسجيل الخروج'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.byType(HomeShell), findsNothing);
+      expect(Navigator.of(tester.element(find.byType(LoginScreen))).canPop(), isFalse);
+    });
   });
 
   group('shell', () {
@@ -460,6 +475,67 @@ void main() {
       expect(find.text('اختاري العميلة'), findsOneWidget);
       // A tab has nothing to go back to, so no back chevron is offered.
       expect(find.byTooltip('رجوع'), findsNothing);
+    });
+  });
+
+  group('login', () {
+    testWidgets('greets Raneen with the credential form', (tester) async {
+      await tester.pumpScreen(const LoginScreen());
+
+      expect(find.text('أهلاً بعودتك'), findsOneWidget);
+      expect(find.text('رنين'), findsOneWidget);
+      expect(find.text('البريد الإلكتروني'), findsOneWidget);
+      expect(find.text('كلمة المرور'), findsOneWidget);
+      expect(find.text('تسجيل الدخول'), findsOneWidget);
+    });
+
+    testWidgets('rejects empty fields', (tester) async {
+      await tester.pumpScreen(const LoginScreen());
+
+      await tester.tap(find.text('تسجيل الدخول'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('أدخلي البريد الإلكتروني وكلمة المرور.'), findsOneWidget);
+      expect(find.byType(WelcomeScreen), findsNothing);
+    });
+
+    testWidgets('rejects a malformed email', (tester) async {
+      await tester.pumpScreen(const LoginScreen());
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'not-an-email');
+      await tester.enterText(fields.at(1), 'whatever');
+      await tester.tap(find.text('تسجيل الدخول'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('تحققي من صيغة البريد الإلكتروني.'), findsOneWidget);
+    });
+
+    testWidgets('valid credentials continue to the welcome hub',
+        (tester) async {
+      await tester.pumpScreen(const LoginScreen());
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'raneen@example.com');
+      await tester.enterText(fields.at(1), 'whatever');
+      await tester.tap(find.text('تسجيل الدخول'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WelcomeScreen), findsOneWidget);
+      expect(find.byType(LoginScreen), findsNothing);
+    });
+
+    testWidgets('typing again clears a shown error', (tester) async {
+      await tester.pumpScreen(const LoginScreen());
+
+      await tester.tap(find.text('تسجيل الدخول'));
+      await tester.pumpAndSettle();
+      expect(find.text('أدخلي البريد الإلكتروني وكلمة المرور.'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).first, 'r');
+      await tester.pump();
+
+      expect(find.text('أدخلي البريد الإلكتروني وكلمة المرور.'), findsNothing);
     });
   });
 

@@ -4,7 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'data/app_store.dart';
 import 'data/store_scope.dart';
-import 'screens/welcome_screen.dart';
+import 'screens/login_screen.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 
@@ -29,8 +29,7 @@ class TaghdiyaApp extends StatelessWidget {
   final AppStore store;
 
   /// Overridden by the widget tests to mount a single screen inside the
-  /// real app configuration. Production always starts at
-  /// [WelcomeScreen].
+  /// real app configuration. Production always starts at [LoginScreen].
   ///
   /// Tests share this widget rather than assembling their own MaterialApp
   /// so the two can never drift: an earlier version of the harness built
@@ -62,7 +61,7 @@ class TaghdiyaApp extends StatelessWidget {
           textDirection: TextDirection.rtl,
           child: child ?? const SizedBox.shrink(),
         ),
-        home: home ?? const WelcomeScreen(),
+        home: home ?? const LoginScreen(),
       ),
     );
   }
