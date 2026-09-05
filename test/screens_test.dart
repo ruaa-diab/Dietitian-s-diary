@@ -108,6 +108,43 @@ void main() {
     });
   });
 
+  group('empty states in a short window', () {
+    /// A browser window is any height its owner drags it to, and the
+    /// empty states are a fixed stack of illustration, headline, sentence
+    /// and button. At 560px that stack is taller than the space, which
+    /// used to overflow — the yellow-and-black striped bar, and a button
+    /// half off the bottom. Widget tests fail on an overflow, so pumping
+    /// them short is the whole check.
+    Future<void> pumpShort(WidgetTester tester, Widget child, AppStore store) async {
+      tester.view.physicalSize = const Size(1366, 560);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(TaghdiyaApp(store: store, home: child));
+      await tester.pump();
+    }
+
+    testWidgets('اليوم fits, and still offers the appointment button',
+        (tester) async {
+      await pumpShort(tester, const HomeShell(), AppStore(seed: _emptySeed));
+
+      expect(find.text('لا زيارات اليوم'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('إضافة موعد'), 100);
+      expect(find.text('إضافة موعد'), findsOneWidget);
+    });
+
+    testWidgets('العميلات fits too', (tester) async {
+      final store = AppStore(seed: _emptySeed);
+      await pumpShort(tester, const HomeShell(), store);
+      await tester.tap(find.text('العميلات').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('لم تضيفي عميلات بعد'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('إضافة أول عميلة'), 100);
+      expect(find.text('إضافة أول عميلة'), findsOneWidget);
+    });
+  });
+
   group('02 · العميلات', () {
     Future<void> openClients(WidgetTester tester) async {
       await tester.tap(find.text('العميلات').last);

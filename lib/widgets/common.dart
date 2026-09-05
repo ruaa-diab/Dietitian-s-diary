@@ -505,6 +505,41 @@ class AppTextField extends StatelessWidget {
   }
 }
 
+/// Centres [child] in whatever space is left over, and scrolls instead
+/// of overflowing when that space is shorter than the content.
+///
+/// The empty states are a fixed stack — illustration, headline, sentence,
+/// button — and a browser window can be any height at all, including
+/// shorter than that stack. Centring alone overflows there (a few pixels
+/// is enough for the yellow-and-black striped bar); this keeps the
+/// centred look when there is room and gives way to a scroll when there
+/// isn't.
+class ScrollableCenter extends StatelessWidget {
+  const ScrollableCenter({
+    super.key,
+    required this.child,
+    this.padding = EdgeInsets.zero,
+  });
+
+  final Widget child;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Padding(
+            padding: padding,
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The small grey label that sits above a field or section.
 class FieldLabel extends StatelessWidget {
   const FieldLabel(this.text, {super.key, this.padding = const EdgeInsets.only(bottom: 10)});

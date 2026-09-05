@@ -285,10 +285,10 @@ class _TodayEmpty extends StatelessWidget {
         children: [
           const _TodayHeading(),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 60, left: 14, right: 14),
+            child: ScrollableCenter(
+              padding: const EdgeInsets.only(top: 20, bottom: 60, left: 14, right: 14),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const NoVisitsIllustration(),
                   const SizedBox(height: 26),
