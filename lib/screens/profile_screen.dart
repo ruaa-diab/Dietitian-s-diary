@@ -377,6 +377,8 @@ class _ChangePasswordSheetState extends State<ChangePasswordSheet> {
       'weak-password' => 'كلمة المرور الجديدة ضعيفة. اختاري واحدة أطول.',
       'requires-recent-login' => 'لأمانك، سجّلي الخروج ثم الدخول وحاولي مرة أخرى.',
       'too-many-requests' => 'محاولات كثيرة متتالية. حاولي بعد قليل.',
+      // Demo mode: there is no real account behind the screen.
+      'no-current-user' => 'لا يمكن تغيير كلمة المرور في وضع التجربة.',
       'network-request-failed' => 'تحققي من اتصال الإنترنت وحاولي مرة أخرى.',
       _ => 'تعذّر تغيير كلمة المرور. حاولي مرة أخرى.',
     };
