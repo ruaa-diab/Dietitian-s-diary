@@ -20,6 +20,7 @@ class ProgressCard extends StatelessWidget {
     required this.packageNumber,
     required this.days,
     required this.attendedVisits,
+    this.byline,
     this.width = 412,
     this.shadow = true,
   });
@@ -32,6 +33,12 @@ class ProgressCard extends StatelessWidget {
   final int packageNumber;
   final int days;
   final int attendedVisits;
+
+  /// The dietitian's name and title under the brand mark. Passed in
+  /// rather than read from [PracticeProfile] so a renamed practice shows
+  /// its own name on the card it shares; null falls back to the default.
+  final String? byline;
+
   final double width;
   final bool shadow;
 
@@ -62,7 +69,7 @@ class ProgressCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _Header(packageLabel: _packageLabel),
+          _Header(packageLabel: _packageLabel, byline: byline ?? PracticeProfile.byline),
           const SizedBox(height: 26),
           Text('تقدّم', style: AppText.bodyLarge.copyWith(height: 1.2)),
           const SizedBox(height: 4),
@@ -118,9 +125,10 @@ class ProgressCard extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.packageLabel});
+  const _Header({required this.packageLabel, required this.byline});
 
   final String packageLabel;
+  final String byline;
 
   @override
   Widget build(BuildContext context) {
@@ -144,7 +152,7 @@ class _Header extends StatelessWidget {
               Text(PracticeProfile.brandName, style: AppText.brandMark),
               const SizedBox(height: 2),
               Text(
-                PracticeProfile.byline,
+                byline,
                 style: AppText.metaTiny.copyWith(color: AppColors.textMuted),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

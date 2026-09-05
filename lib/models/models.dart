@@ -138,11 +138,21 @@ class Visit {
 
   bool get isResolved => status != VisitStatus.scheduled;
 
-  Visit copyWith({VisitStatus? status, DateTime? scheduledAt}) => Visit(
+  /// [clientId], [packageId] and [index] move together when an
+  /// appointment is reassigned to a different client: the visit leaves
+  /// one package for another, and takes its place in the new one.
+  Visit copyWith({
+    VisitStatus? status,
+    DateTime? scheduledAt,
+    String? clientId,
+    String? packageId,
+    int? index,
+  }) =>
+      Visit(
         id: id,
-        clientId: clientId,
-        packageId: packageId,
-        index: index,
+        clientId: clientId ?? this.clientId,
+        packageId: packageId ?? this.packageId,
+        index: index ?? this.index,
         scheduledAt: scheduledAt ?? this.scheduledAt,
         status: status ?? this.status,
       );

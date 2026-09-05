@@ -155,6 +155,16 @@ abstract final class AppIcons {
       ..lineTo(9, 18);
   }, strokeWidth: 2.2);
 
+  /// The same chevron pointing the other way — the calendar's month
+  /// stepper needs both directions, and mirroring a painted path at the
+  /// call site is more trouble than a second path.
+  static final chevronBack = LineIconData((p) {
+    p
+      ..moveTo(15, 6)
+      ..lineTo(9, 12)
+      ..lineTo(15, 18);
+  }, strokeWidth: 2.2);
+
   /// Overflow menu.
   static final more = LineIconData((p) {
     for (final y in const [5.0, 12.0, 19.0]) {
@@ -209,6 +219,37 @@ abstract final class AppIcons {
       ..moveTo(20, 4)
       ..lineTo(20, 8)
       ..lineTo(16, 8);
+  });
+
+  /// Bottom nav — المواعيد. A clock rather than a second calendar, so it
+  /// doesn't read as the same destination as اليوم.
+  static final clock = LineIconData((p) {
+    p.addOval(Rect.fromCircle(center: const Offset(12, 12), radius: 9));
+    p
+      ..moveTo(12, 7)
+      ..lineTo(12, 12)
+      ..lineTo(15.5, 14);
+  });
+
+  /// Removing something — the appointment sheet's حذف.
+  static final trash = LineIconData((p) {
+    p
+      ..moveTo(4, 7)
+      ..lineTo(20, 7)
+      ..moveTo(9.5, 7)
+      ..lineTo(9.5, 4.5)
+      ..lineTo(14.5, 4.5)
+      ..lineTo(14.5, 7);
+    p
+      ..moveTo(6, 7)
+      ..lineTo(7, 20)
+      ..lineTo(17, 20)
+      ..lineTo(18, 7);
+    p
+      ..moveTo(10.5, 10.5)
+      ..lineTo(10.5, 16.5)
+      ..moveTo(13.5, 10.5)
+      ..lineTo(13.5, 16.5);
   });
 }
 

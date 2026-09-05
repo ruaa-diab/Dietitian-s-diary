@@ -125,14 +125,20 @@ class _NewPackageScreenState extends State<NewPackageScreen> {
                     onAcceptSuggestion: (id) => setState(() => _clientId = id),
                   ),
                   const _StepLabel(step: 2, label: 'الباقة'),
+                  // One shape is sold — ٤ زيارات for ١٠٠ ₪ — so this
+                  // reads as the package rather than as a choice: no
+                  // radio, and nothing to tap. A second entry in
+                  // packageOptions would bring both back on its own.
                   for (final option in AppStore.packageOptions) ...[
                     _PackageOptionCard(
                       option: option,
                       selected: option.visitCount == _option.visitCount,
-                      onTap: () => setState(() {
-                        _option = option;
-                        _syncAmount();
-                      }),
+                      onTap: AppStore.packageOptions.length == 1
+                          ? null
+                          : () => setState(() {
+                                _option = option;
+                                _syncAmount();
+                              }),
                     ),
                     if (option != AppStore.packageOptions.last) const SizedBox(height: 10),
                   ],
@@ -404,13 +410,16 @@ class _PackageOptionCard extends StatelessWidget {
 
   final PackageOption option;
   final bool selected;
-  final VoidCallback onTap;
+
+  /// Null when there is nothing to choose between — the card then shows
+  /// the package without a radio, since tapping it would do nothing.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       selected: selected,
-      inMutuallyExclusiveGroup: true,
+      inMutuallyExclusiveGroup: onTap != null,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
@@ -426,8 +435,10 @@ class _PackageOptionCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _Radio(selected: selected),
-              const SizedBox(width: 14),
+              if (onTap != null) ...[
+                _Radio(selected: selected),
+                const SizedBox(width: 14),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

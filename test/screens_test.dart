@@ -8,6 +8,7 @@ import 'package:taghdiya/data/app_store.dart';
 import 'package:taghdiya/data/sample_data.dart';
 import 'package:taghdiya/main.dart';
 import 'package:taghdiya/models/models.dart';
+import 'package:taghdiya/screens/appointment_sheet.dart';
 import 'package:taghdiya/screens/auth_gate.dart';
 import 'package:taghdiya/screens/client_detail_screen.dart';
 import 'package:taghdiya/screens/home_shell.dart';
@@ -184,7 +185,189 @@ void main() {
       await tester.tap(find.text('إضافة موعد'));
       await tester.pumpAndSettle();
 
-      expect(find.text('إضافة موعد اليوم'), findsOneWidget);
+      expect(find.text('موعد جديد'), findsOneWidget);
+      expect(find.text('اختاري العميلة'), findsOneWidget);
+    });
+  });
+
+  group('المواعيد · the schedule', () {
+    /// The picker floats over the day's own list, which shows some of the
+    /// same names — scope to the sheet or the finders count both.
+    Finder inPicker(String text) => find.descendant(
+          of: find.byType(ClientPickerSheet),
+          matching: find.text(text),
+        );
+
+    Future<AppStore> openSchedule(WidgetTester tester, {AppStore? store}) async {
+      final appStore = await tester.pumpScreen(const HomeShell(), store: store);
+      await tester.tap(find.text('المواعيد').last);
+      await tester.pumpAndSettle();
+      return appStore;
+    }
+
+    testWidgets('opens on the current month with today selected', (tester) async {
+      final store = await openSchedule(tester);
+      final today = DateTime.now();
+
+      expect(find.text('المواعيد'), findsWidgets);
+      expect(find.text(ArabicDates.monthYear(today)), findsOneWidget);
+      expect(find.text(ArabicDates.weekdayDayMonth(today)), findsOneWidget);
+      // Today's four appointments are listed under the calendar.
+      expect(
+        find.text(ArabicDates.visits(store.visitsOn(today).length)),
+        findsWidgets,
+      );
+      expect(find.text('إضافة موعد'), findsOneWidget);
+    });
+
+    testWidgets('stepping months moves the header', (tester) async {
+      await openSchedule(tester);
+      final today = DateTime.now();
+
+      await tester.tap(find.byTooltip('الشهر التالي'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(ArabicDates.monthYear(DateTime(today.year, today.month + 1))),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byTooltip('الشهر السابق'));
+      await tester.pumpAndSettle();
+      expect(find.text(ArabicDates.monthYear(today)), findsOneWidget);
+    });
+
+    testWidgets('a day already gone can be read but not booked into',
+        (tester) async {
+      await openSchedule(tester);
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      // Only reachable by tapping a cell when yesterday is in this month.
+      if (yesterday.month != DateTime.now().month) return;
+
+      await tester.tap(find.text(fmtInt(yesterday.day)).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('لا يمكن حجز موعد في يوم مضى. اختاري اليوم أو يوماً قادماً.'),
+          findsOneWidget);
+      final button = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'إضافة موعد'),
+      );
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('booking searches by name and lands on the chosen day',
+        (tester) async {
+      final store = await openSchedule(tester);
+      final before = store.visitsForClient('c-heba').length;
+
+      // A busy day pushes the button below the fold, where a tap lands
+      // on nothing.
+      await tester.ensureVisible(find.text('إضافة موعد'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('إضافة موعد'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('اختاري العميلة').last);
+      await tester.pumpAndSettle();
+
+      // The picker searches rather than making her scroll 24 names.
+      await tester.enterText(find.byType(TextField).first, 'هبة');
+      await tester.pumpAndSettle();
+      expect(inPicker('هبة منصور'), findsOneWidget);
+      expect(inPicker('نور خالد'), findsNothing);
+      await tester.tap(inPicker('هبة منصور'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('حفظ الموعد'));
+      await tester.pumpAndSettle();
+
+      expect(store.visitsForClient('c-heba').length, before + 1);
+      expect(find.text('هبة منصور'), findsWidgets);
+    });
+
+    testWidgets('a search with no match offers to add her', (tester) async {
+      final store = await openSchedule(tester);
+
+      // A busy day pushes the button below the fold, where a tap lands
+      // on nothing.
+      await tester.ensureVisible(find.text('إضافة موعد'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('إضافة موعد'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('اختاري العميلة').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).first, 'سناء');
+      await tester.pumpAndSettle();
+      expect(find.text('لا توجد عميلة بهذا الاسم.'), findsOneWidget);
+
+      await tester.tap(find.text('إضافة عميلة جديدة'));
+      await tester.pumpAndSettle();
+      final fields = find.descendant(
+        of: find.byType(NewClientSheet),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(fields.at(0), 'سناء قدري');
+      await tester.enterText(fields.at(1), '0521119876');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حفظ'));
+      await tester.pumpAndSettle();
+
+      expect(store.clients.last.name, 'سناء قدري');
+      // She comes back as the picked client — and the sheet says what is
+      // still missing before the appointment can be saved.
+      expect(find.text('سناء قدري'), findsWidgets);
+      expect(find.text('بيع باقة لـسناء قدري'), findsOneWidget);
+      final save = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'حفظ الموعد'),
+      );
+      expect(save.onPressed, isNull);
+    });
+
+    testWidgets('an appointment can be moved, and cancelled', (tester) async {
+      final store = await openSchedule(tester);
+      final at = DateTime.now().add(const Duration(days: 2));
+      final booked = store.scheduleVisit(clientId: 'c-nour', at: at)!;
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text(fmtInt(at.day)).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('نور خالد'));
+      await tester.pumpAndSettle();
+      expect(find.text('تعديل الموعد'), findsOneWidget);
+
+      // Move it to another client, then cancel it outright.
+      await tester.tap(find.text('نور خالد').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'هبة');
+      await tester.pumpAndSettle();
+      await tester.tap(inPicker('هبة منصور'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حفظ التعديلات'));
+      await tester.pumpAndSettle();
+      expect(store.visit(booked.id).clientId, 'c-heba');
+
+      await tester.tap(find.text('هبة منصور'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حذف الموعد'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حذف'));
+      await tester.pumpAndSettle();
+
+      expect(store.visits.map((v) => v.id), isNot(contains(booked.id)));
+    });
+
+    testWidgets('an appointment already recorded cannot be moved',
+        (tester) async {
+      final store = await openSchedule(tester);
+      final recorded = store.todayVisits.firstWhere((v) => v.isResolved);
+      final client = store.client(recorded.clientId);
+
+      await tester.tap(find.text(client.name).last);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('فلا يمكن نقله'), findsOneWidget);
+      // Only cancelling is on offer; there is no save.
+      expect(find.widgetWithText(FilledButton, 'حفظ التعديلات'), findsNothing);
+      expect(find.text('حذف الموعد'), findsOneWidget);
     });
   });
 
@@ -203,17 +386,143 @@ void main() {
   });
 
   group('03 · ملف العميلة', () {
-    testWidgets('identity, balance, weight and package history', (tester) async {
-      await tester.pumpScreen(const ClientDetailScreen(clientId: 'c-nour'));
+    testWidgets('identity, balance and the visit record', (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
 
       expect(find.text('نور خالد'), findsOneWidget);
       expect(find.text('٠٥٤ ١٢٣ ٤٥٦٧ · ٣٤ سنة'), findsOneWidget);
       expect(find.text('رصيد مستحق'), findsOneWidget);
       expect(find.text('١٠٠ ₪'), findsWidgets);
       expect(find.text('تسجيل دفعة'), findsOneWidget);
+      // Her fourth visit is still to come, so she has one left.
+      expect(find.text('١ متبقية'), findsOneWidget);
+      // When she last paid — the question the balance alone can't answer.
+      expect(find.text('آخر دفعة'), findsOneWidget);
+      final last = store.lastPaymentFor('c-nour')!;
+      expect(
+        find.text('${ArabicDates.dayMonth(last.date)} · ${fmtCurrency(last.amount)}'),
+        findsOneWidget,
+      );
+      expect(find.text('سجل الزيارات'), findsOneWidget);
+    });
+
+    testWidgets('every visit shows its day and date', (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
+
+      final visits = store.visitsForClient('c-nour');
+      expect(visits, isNotEmpty);
+      for (final visit in visits.take(3)) {
+        expect(
+          find.text('${ArabicDates.weekdayDayMonth(visit.scheduledAt)}'
+              ' · ${ArabicDates.time(visit.scheduledAt)}'),
+          findsOneWidget,
+        );
+      }
+      // Each attended visit is labelled with its own place in its own
+      // package — the record spans every package she has ever had.
+      for (final visit in visits.take(3).where((v) => v.status == VisitStatus.attended)) {
+        final number = store.visitNumber(visit)!;
+        expect(
+          find.text('حضرت · الزيارة ${fmtInt(number)} من '
+              '${fmtInt(store.package(visit.packageId).visitCount)}'),
+          findsWidgets,
+        );
+      }
+    });
+
+    testWidgets('the package history is below the visit record', (tester) async {
+      await tester.pumpScreen(const ClientDetailScreen(clientId: 'c-nour'));
+
+      await tester.scrollUntilVisible(find.text('سجل الباقات'), 200);
+      await tester.pumpAndSettle();
+
       expect(find.text('سجل الباقات'), findsOneWidget);
       expect(find.text('غير مدفوعة'), findsOneWidget);
       expect(find.text('مدفوعة'), findsNWidgets(2));
+    });
+
+    testWidgets('a wrongly-marked attendance can be corrected here',
+        (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
+      final pkg = store.activePackage('c-nour')!;
+      final attended = store.visitsForClient('c-nour').firstWhere(
+            (v) => v.status == VisitStatus.attended && v.packageId == pkg.id,
+          );
+      expect(store.attendedCount(pkg.id), 3);
+
+      // "قلت إنها حضرت وتبيّن أنها لم تحضر."
+      final editRow = find.byKey(ValueKey('edit-visit-${attended.id}'));
+      await tester.ensureVisible(editRow);
+      await tester.pumpAndSettle();
+      await tester.tap(editRow);
+      await tester.pumpAndSettle();
+      expect(find.text('تعديل الزيارة'), findsOneWidget);
+      await tester.tap(find.text('لم تحضر'));
+      await tester.pumpAndSettle();
+
+      // The visit goes back to the package rather than being spent.
+      expect(store.attendedCount(pkg.id), 2);
+      expect(store.remainingVisits(pkg.id), 2);
+      await tester.scrollUntilVisible(find.text('٢ متبقية'), -200);
+      expect(find.text('٢ متبقية'), findsOneWidget);
+      expect(find.text('لم تحضر · لم تُحتسب من الباقة'), findsWidgets);
+    });
+
+    testWidgets('editing her details from the overflow menu', (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
+
+      await tester.tap(_overflowMenu, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('تعديل البيانات'));
+      await tester.pumpAndSettle();
+
+      // The sheet opens on her current details, not an empty form.
+      expect(find.text('تعديل بيانات العميلة'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'نور خالد'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).first, 'نور خالد الأحمد');
+      await tester.tap(find.text('حفظ التعديلات'));
+      await tester.pumpAndSettle();
+
+      expect(store.client('c-nour').name, 'نور خالد الأحمد');
+      expect(store.client('c-nour').phone, '0541234567');
+      expect(find.text('نور خالد الأحمد'), findsOneWidget);
+    });
+
+    testWidgets('deleting her asks first, then clears her out',
+        (tester) async {
+      final store = await tester.pumpScreen(
+        const ClientDetailScreen(clientId: 'c-nour'),
+      );
+
+      await tester.tap(_overflowMenu, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حذف العميلة'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('حذف نور خالد؟'), findsOneWidget);
+      await tester.tap(find.text('إلغاء'));
+      await tester.pumpAndSettle();
+      expect(store.clientOrNull('c-nour'), isNotNull);
+
+      await tester.tap(_overflowMenu, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حذف العميلة'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('حذف'));
+      await tester.pumpAndSettle();
+
+      expect(store.clientOrNull('c-nour'), isNull);
+      expect(store.packagesFor('c-nour'), isEmpty);
+      expect(store.visitsForClient('c-nour'), isEmpty);
     });
 
     testWidgets('marking a visit attended updates the client file',
@@ -243,6 +552,9 @@ void main() {
       expect(store.attendedCount(pkg.id), 4);
       // The package closed, so the file now offers a renewal.
       expect(find.text('تحتاج تجديد'), findsOneWidget);
+      // Several package rows read the same, so scroll by the section
+      // heading — scrollUntilVisible needs a finder that resolves to one.
+      await tester.scrollUntilVisible(find.text('سجل الباقات'), 200);
       expect(find.text('٤ زيارات · ١٠٠ ₪'), findsWidgets);
     });
 
@@ -284,7 +596,6 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('٤ زيارات'), findsOneWidget);
-      expect(find.text('٨ زيارات'), findsOneWidget);
       expect(find.text('٢٥ ₪ للزيارة'), findsOneWidget);
       expect(find.text('مدفوع كامل'), findsOneWidget);
       expect(find.text('الإجمالي'), findsOneWidget);
@@ -322,14 +633,17 @@ void main() {
       expect(find.text('اختاري العميلة'), findsNothing);
     });
 
-    testWidgets('picking the eight-visit package updates the total',
+    testWidgets('the one package is shown, not offered as a choice',
         (tester) async {
       await tester.pumpScreen(const NewPackageScreen(clientId: 'c-doaa'));
 
-      await tester.tap(find.text('٨ زيارات'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('١٩٠ ₪'), findsWidgets);
+      expect(find.text('٤ زيارات'), findsOneWidget);
+      expect(find.text('١٠٠ ₪'), findsWidgets);
+      // Nothing to pick between, so there is no radio to pick with.
+      expect(
+        find.byWidgetPredicate((w) => w.runtimeType.toString() == '_Radio'),
+        findsNothing,
+      );
     });
 
     testWidgets('saving sells the package', (tester) async {
@@ -454,6 +768,54 @@ void main() {
       expect(find.text('٣٠٠ ₪'), findsOneWidget);
     });
 
+    testWidgets('renaming herself changes the greeting too', (tester) async {
+      final store = await tester.pumpScreen(const HomeShell());
+
+      await tester.tap(find.text('حسابي').last);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('تعديل الاسم'), 200);
+      await tester.tap(find.text('تعديل الاسم'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).first, 'د. سارة العلي');
+      await tester.tap(find.text('حفظ'));
+      await tester.pumpAndSettle();
+
+      expect(store.dietitianName, 'د. سارة العلي');
+      // The identity card is back at the top of the page we scrolled down.
+      await tester.scrollUntilVisible(find.text('د. سارة العلي'), -200);
+      expect(find.text('د. سارة العلي'), findsOneWidget);
+
+      // And the welcome screen greets her by the new given name.
+      await tester.pumpScreen(const WelcomeScreen(), store: store);
+      expect(find.text('سارة'), findsOneWidget);
+    });
+
+    testWidgets('the change-password sheet validates before submitting',
+        (tester) async {
+      await tester.pumpScreen(const HomeShell());
+
+      await tester.tap(find.text('حسابي').last);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('تغيير كلمة المرور'), 200);
+      await tester.tap(find.text('تغيير كلمة المرور'));
+      await tester.pumpAndSettle();
+
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), 'old-password');
+      await tester.enterText(fields.at(1), '123');
+      await tester.enterText(fields.at(2), '123');
+      await tester.tap(find.text('حفظ كلمة المرور'));
+      await tester.pumpAndSettle();
+      expect(find.text('كلمة المرور الجديدة ٦ خانات على الأقل.'), findsOneWidget);
+
+      await tester.enterText(fields.at(1), 'new-password');
+      await tester.enterText(fields.at(2), 'new-passwrod');
+      await tester.tap(find.text('حفظ كلمة المرور'));
+      await tester.pumpAndSettle();
+      expect(find.text('كلمتا المرور غير متطابقتين.'), findsOneWidget);
+    });
+
     // Signing out for real — AuthGate reacting to an actual auth-state
     // change and replacing the whole screen — is covered under the
     // AuthGate group below. A plain in-memory AppStore(), which is all
@@ -466,7 +828,9 @@ void main() {
     testWidgets('باقة جديدة is a tab again', (tester) async {
       await tester.pumpScreen(const HomeShell());
 
-      await tester.tap(find.text('باقة جديدة').last);
+      // Six destinations share the bar, so this one's nav label is the
+      // short "باقة"; the screen it opens still says باقة جديدة.
+      await tester.tap(find.text('باقة').last);
       await tester.pumpAndSettle();
 
       expect(find.byType(NewPackageScreen), findsOneWidget);
@@ -622,6 +986,8 @@ void main() {
       await tester.tap(find.text('حسابي'));
       await tester.pumpAndSettle();
 
+      // The page ends with the logout button, below the account card.
+      await tester.scrollUntilVisible(find.text('تسجيل الخروج'), 200);
       await tester.tap(find.text('تسجيل الخروج'));
       await tester.pumpAndSettle();
 
@@ -639,7 +1005,14 @@ void main() {
       expect(find.text('زيارتان بانتظارك'), findsOneWidget);
       expect(find.text('${fmtInt(store.clients.length)} عميلة'), findsOneWidget);
 
-      for (final label in ['اليوم', 'العميلات', 'باقة جديدة', 'الملخص', 'حسابي']) {
+      for (final label in [
+        'اليوم',
+        'المواعيد',
+        'العميلات',
+        'باقة جديدة',
+        'الملخص',
+        'حسابي',
+      ]) {
         expect(find.text(label), findsOneWidget);
       }
     });

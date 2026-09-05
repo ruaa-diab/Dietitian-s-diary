@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../utils/formatting.dart';
 import 'cloud_store.dart';
+import 'practice_profile.dart';
 import 'sample_data.dart';
 
 /// Application state, held in memory and — outside of tests — mirrored
@@ -43,10 +44,17 @@ class AppStore extends ChangeNotifier {
   }
 
   /// The package shapes offered on the "باقة جديدة" screen.
+  ///
+  /// There is exactly one: ٤ زيارات for ١٠٠ ₪. Kept as a list rather than
+  /// a bare constant because the screen still renders it as a choice of
+  /// one, and a second shape would only be another entry here — nothing
+  /// downstream assumes the count.
   static const packageOptions = <PackageOption>[
     PackageOption(visitCount: 4, price: 100),
-    PackageOption(visitCount: 8, price: 190),
   ];
+
+  /// The package sold unless something says otherwise.
+  static PackageOption get defaultPackage => packageOptions.first;
 
   /// Null in tests and other in-memory-only instances; writes and the
   /// live subscriptions are skipped wherever this is null.
@@ -62,6 +70,7 @@ class AppStore extends ChangeNotifier {
   StreamSubscription<List<Client>>? _clientsSub;
   StreamSubscription<List<ClientPackage>>? _packagesSub;
   StreamSubscription<List<Visit>>? _visitsSub;
+  StreamSubscription<String?>? _profileSub;
 
   /// Listens for changes from Firestore — including ones made on another
   /// device — and folds them into the same lists the UI already reads.
@@ -80,6 +89,12 @@ class AppStore extends ChangeNotifier {
     }, onError: _logError);
     _visitsSub = cloud.watchVisits().listen((visits) {
       _visits = visits;
+      notifyListeners();
+    }, onError: _logError);
+    // Null until she has actually renamed herself, which is the common
+    // case — the default from PracticeProfile stands in until then.
+    _profileSub = cloud.watchDietitianName().listen((name) {
+      _dietitianName = name ?? PracticeProfile.dietitianName;
       notifyListeners();
     }, onError: _logError);
   }
@@ -130,7 +145,57 @@ class AppStore extends ChangeNotifier {
     _clientsSub?.cancel();
     _packagesSub?.cancel();
     _visitsSub?.cancel();
+    _profileSub?.cancel();
     super.dispose();
+  }
+
+  // ── The dietitian's own account ──────────────────────────────────────
+
+  String _dietitianName = PracticeProfile.dietitianName;
+
+  /// Her name as she has set it — the default from [PracticeProfile]
+  /// until she edits it on حسابي, after which it lives in Firestore
+  /// beside her data and follows her to every device.
+  String get dietitianName => _dietitianName;
+
+  /// Just the given name, for greeting her directly.
+  String get dietitianFirstName => PracticeProfile.firstNameOf(_dietitianName);
+
+  String get dietitianByline => '$_dietitianName · ${PracticeProfile.title}';
+
+  /// The address she signs in with; null in tests, where there is no account.
+  String? get accountEmail => _auth?.currentUser?.email;
+
+  void updateDietitianName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == _dietitianName) return;
+    _dietitianName = trimmed;
+    _persist((cloud) => cloud.saveDietitianName(trimmed));
+    notifyListeners();
+  }
+
+  /// Changes the account password. Firebase requires a recent sign-in for
+  /// this, so the current password is re-submitted here rather than
+  /// bouncing her out to the login screen and back.
+  ///
+  /// Throws [FirebaseAuthException] on a wrong current password, a weak
+  /// new one, or no connection; the caller turns the code into a message.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth?.currentUser;
+    final email = user?.email;
+    if (user == null || email == null) {
+      throw FirebaseAuthException(
+        code: 'no-current-user',
+        message: 'No signed-in account to change the password of.',
+      );
+    }
+    await user.reauthenticateWithCredential(
+      EmailAuthProvider.credential(email: email, password: currentPassword),
+    );
+    await user.updatePassword(newPassword);
   }
 
   /// Set when marking a visit completes a package, so the Today screen can
@@ -181,6 +246,35 @@ class AppStore extends ChangeNotifier {
       _visits.where((v) => v.packageId == packageId).toList()
         ..sort((a, b) => a.index.compareTo(b.index));
 
+  /// Every visit a client has ever had, most recent first — the record
+  /// her file shows, day by day, across all her packages.
+  List<Visit> visitsForClient(String clientId) =>
+      _visits.where((v) => v.clientId == clientId).toList()
+        ..sort((a, b) => _byScheduleThenIndex(b, a));
+
+  /// Every payment a client has made, most recent first.
+  List<Payment> paymentsFor(String clientId) => [
+        for (final pkg in _packages.where((p) => p.clientId == clientId)) ...pkg.payments,
+      ]..sort((a, b) => b.date.compareTo(a.date));
+
+  /// Her most recent payment, or null if she has never paid anything.
+  Payment? lastPaymentFor(String clientId) => paymentsFor(clientId).firstOrNull;
+
+  /// Removes a payment recorded by mistake — a wrong amount, or one
+  /// entered against the wrong client. The balance goes straight back up
+  /// by what the payment was worth, and the month's revenue back down.
+  void deletePayment({required String packageId, required String paymentId}) {
+    final index = _packages.indexWhere((p) => p.id == packageId);
+    if (index < 0) return;
+    final pkg = _packages[index];
+    final remaining = pkg.payments.where((p) => p.id != paymentId).toList();
+    if (remaining.length == pkg.payments.length) return;
+
+    _packages[index] = pkg.copyWith(payments: remaining);
+    _persist((cloud) => cloud.updatePackage(_packages[index]));
+    notifyListeners();
+  }
+
   int attendedCount(String packageId) => _visits
       .where((v) => v.packageId == packageId && v.status == VisitStatus.attended)
       .length;
@@ -188,10 +282,18 @@ class AppStore extends ChangeNotifier {
   int resolvedCount(String packageId) =>
       _visits.where((v) => v.packageId == packageId && v.isResolved).length;
 
+  int noShowCount(String packageId) => _visits
+      .where((v) => v.packageId == packageId && v.status == VisitStatus.noShow)
+      .length;
+
   /// Visits still to be used up — what the "N متبقية" badge counts.
+  ///
+  /// Only a visit she actually attended spends one. A لم تحضر is recorded
+  /// and stays visible in her file, but it costs the client nothing: she
+  /// paid for four visits and still has four coming.
   int remainingVisits(String packageId) {
     final pkg = package(packageId);
-    return (pkg.visitCount - resolvedCount(packageId)).clamp(0, pkg.visitCount);
+    return (pkg.visitCount - attendedCount(packageId)).clamp(0, pkg.visitCount);
   }
 
   /// Remaining visits across a client's running package; 0 when idle.
@@ -200,8 +302,37 @@ class AppStore extends ChangeNotifier {
     return active == null ? 0 : remainingVisits(active.id);
   }
 
+  /// A package is done when its visits have all been *attended* — see
+  /// [remainingVisits] for why a no-show doesn't count toward it.
   bool isPackageComplete(String packageId) =>
-      resolvedCount(packageId) >= package(packageId).visitCount;
+      attendedCount(packageId) >= package(packageId).visitCount;
+
+  /// Which of the package's visits this one is — "الزيارة ٣ من ٤".
+  ///
+  /// Counted by attendance, not by the slot the visit was booked into: a
+  /// missed appointment leaves the count where it was, so the next one
+  /// she attends is still the third of four. Returns null for a no-show,
+  /// which occupies no number at all.
+  int? visitNumber(Visit visit) {
+    switch (visit.status) {
+      case VisitStatus.noShow:
+        return null;
+      case VisitStatus.attended:
+        final attended = _visits
+            .where((v) => v.packageId == visit.packageId && v.status == VisitStatus.attended)
+            .toList()
+          ..sort(_byScheduleThenIndex);
+        return attended.indexWhere((v) => v.id == visit.id) + 1;
+      case VisitStatus.scheduled:
+        // The number it would take if she attends it.
+        return attendedCount(visit.packageId) + 1;
+    }
+  }
+
+  static int _byScheduleThenIndex(Visit a, Visit b) {
+    final byDate = a.scheduledAt.compareTo(b.scheduledAt);
+    return byDate != 0 ? byDate : a.index.compareTo(b.index);
+  }
 
   // ── Today ────────────────────────────────────────────────────────────
 
@@ -321,44 +452,60 @@ class AppStore extends ChangeNotifier {
   // confirm it (or, rarely, correct it) once Firestore's own local cache
   // reflects the change — visually a no-op, since it's the same data.
 
-  /// Records a visit outcome. Completing the last visit of a package
+  /// Records a visit outcome. Attending the last visit of a package
   /// closes the package and queues the celebration.
-  void markVisit(String visitId, VisitStatus status) {
+  ///
+  /// [celebrate] is off when the change is a *correction* — fixing a
+  /// wrongly-marked attendance from the client file, where a party popper
+  /// over a bookkeeping fix would be beside the point.
+  void markVisit(String visitId, VisitStatus status, {bool celebrate = true}) =>
+      _setVisitStatus(visitId, status, celebrate: celebrate);
+
+  /// Undoes a حضرت / لم تحضر decision, putting the visit back to
+  /// "not recorded yet" and reopening the package if that decision was
+  /// the one that closed it.
+  void undoVisit(String visitId) =>
+      _setVisitStatus(visitId, VisitStatus.scheduled, celebrate: false);
+
+  /// The one place a visit's outcome changes — marking it, undoing it, or
+  /// correcting it later all land here, so the package it belongs to is
+  /// opened and closed by the same rule every time. Changing an attended
+  /// visit back to a no-show, say, reopens a package that this visit had
+  /// closed; nothing needs to remember that it was the one that closed it.
+  void _setVisitStatus(String visitId, VisitStatus status, {required bool celebrate}) {
     final index = _visits.indexWhere((v) => v.id == visitId);
     if (index < 0) return;
     final visit = _visits[index];
+    if (visit.status == status) return;
     _visits[index] = visit.copyWith(status: status);
 
-    ClientPackage? closedPackage;
-    if (isPackageComplete(visit.packageId)) {
-      final pkgIndex = _packages.indexWhere((p) => p.id == visit.packageId);
-      if (pkgIndex >= 0 && _packages[pkgIndex].isActive) {
-        _packages[pkgIndex] = _packages[pkgIndex].copyWith(endDate: now);
-        pendingCelebration = _packages[pkgIndex];
-        closedPackage = _packages[pkgIndex];
-      }
-    }
-    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], closedPackage));
+    final changedPackage = _reconcilePackage(visit.packageId, celebrate: celebrate);
+    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], changedPackage));
     notifyListeners();
   }
 
-  /// Undoes a حضرت / لم تحضر decision, reopening the package if that
-  /// decision was the one that closed it.
-  void undoVisit(String visitId) {
-    final index = _visits.indexWhere((v) => v.id == visitId);
-    if (index < 0) return;
-    final visit = _visits[index];
-    _visits[index] = visit.copyWith(status: VisitStatus.scheduled);
+  /// Brings a package's open/closed state back in line with how many of
+  /// its visits have actually been attended, and returns it if that
+  /// changed anything. Every path that can move the attended count —
+  /// marking, correcting, deleting or reassigning a visit — goes through
+  /// here, so none of them has to reason about it separately.
+  ClientPackage? _reconcilePackage(String packageId, {bool celebrate = false}) {
+    final pkgIndex = _packages.indexWhere((p) => p.id == packageId);
+    if (pkgIndex < 0) return null;
+    final pkg = _packages[pkgIndex];
+    final complete = isPackageComplete(pkg.id);
 
-    ClientPackage? reopenedPackage;
-    final pkgIndex = _packages.indexWhere((p) => p.id == visit.packageId);
-    if (pkgIndex >= 0 && !_packages[pkgIndex].isActive) {
-      _packages[pkgIndex] = _packages[pkgIndex].copyWith(clearEndDate: true);
-      reopenedPackage = _packages[pkgIndex];
+    ClientPackage? changed;
+    if (complete && pkg.isActive) {
+      _packages[pkgIndex] = pkg.copyWith(endDate: now);
+      changed = _packages[pkgIndex];
+      if (celebrate) pendingCelebration = changed;
+    } else if (!complete && !pkg.isActive) {
+      _packages[pkgIndex] = pkg.copyWith(clearEndDate: true);
+      changed = _packages[pkgIndex];
     }
-    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], reopenedPackage));
-    if (pendingCelebration?.id == visit.packageId) pendingCelebration = null;
-    notifyListeners();
+    if (!complete && pendingCelebration?.id == pkg.id) pendingCelebration = null;
+    return changed;
   }
 
   void consumeCelebration() {
@@ -463,21 +610,155 @@ class AppStore extends ChangeNotifier {
     return client;
   }
 
-  /// Adds a one-off appointment against the client's running package.
-  void scheduleVisit({required String clientId, required DateTime at}) {
+  /// Corrects a client's details. Only the fields passed change, so
+  /// editing a phone number can't quietly blank an age.
+  void updateClient(
+    String id, {
+    String? name,
+    String? phone,
+    int? age,
+  }) {
+    final index = _clients.indexWhere((c) => c.id == id);
+    if (index < 0) return;
+    _clients[index] = _clients[index].copyWith(
+      name: name?.trim(),
+      phone: phone?.trim(),
+      age: age,
+    );
+    _persist((cloud) => cloud.updateClient(_clients[index]));
+    notifyListeners();
+  }
+
+  /// Removes a client and everything hanging off her — her packages,
+  /// their payments (which live inside the package documents) and every
+  /// visit. Leaving those behind would keep her money in the dashboard's
+  /// totals and her appointments on the schedule long after she is gone.
+  void deleteClient(String id) {
+    final packageIds = _packages.where((p) => p.clientId == id).map((p) => p.id).toList();
+    final visitIds = _visits.where((v) => v.clientId == id).map((v) => v.id).toList();
+
+    _clients.removeWhere((c) => c.id == id);
+    _packages.removeWhere((p) => p.clientId == id);
+    _visits.removeWhere((v) => v.clientId == id);
+    if (packageIds.contains(pendingCelebration?.id)) pendingCelebration = null;
+
+    _persist((cloud) => cloud.deleteClient(
+          clientId: id,
+          packageIds: packageIds,
+          visitIds: visitIds,
+        ));
+    notifyListeners();
+  }
+
+  // ── The schedule ─────────────────────────────────────────────────────
+  //
+  // An appointment is a [Visit] against a package the client has already
+  // bought, so scheduling one always needs a running package to hang it
+  // on — that is what [canSchedule] answers before the sheet lets her
+  // pick someone.
+
+  /// Whether an appointment can be booked for this client at all: she
+  /// needs a package that is still running.
+  bool canSchedule(String clientId) => activePackage(clientId) != null;
+
+  /// Clients an appointment can be booked for, by name.
+  List<Client> get schedulableClients =>
+      _clients.where((c) => canSchedule(c.id)).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+  /// Books an appointment against the client's running package. Returns
+  /// null — booking nothing — when she has no package to book against.
+  Visit? scheduleVisit({required String clientId, required DateTime at}) {
     final active = activePackage(clientId);
-    if (active == null) return;
-    final existing = visitsForPackage(active.id);
+    if (active == null) return null;
     final visit = Visit(
       id: _nextId('visit'),
       clientId: clientId,
       packageId: active.id,
-      index: existing.length + 1,
+      index: _nextIndexIn(active.id),
       scheduledAt: at,
     );
     _visits.add(visit);
     _persist((cloud) => cloud.insertVisit(visit));
     notifyListeners();
+    return visit;
+  }
+
+  /// Moves an appointment: a new time, a new day, a different client, or
+  /// any combination. Returns false when it asked for a client with no
+  /// running package to move it to, in which case nothing changes.
+  bool rescheduleVisit(String visitId, {DateTime? at, String? clientId}) {
+    final index = _visits.indexWhere((v) => v.id == visitId);
+    if (index < 0) return false;
+    final visit = _visits[index];
+
+    final movingToNewClient = clientId != null && clientId != visit.clientId;
+    ClientPackage? target;
+    if (movingToNewClient) {
+      target = activePackage(clientId);
+      if (target == null) return false;
+    }
+
+    _visits[index] = visit.copyWith(
+      scheduledAt: at,
+      clientId: movingToNewClient ? clientId : null,
+      packageId: movingToNewClient ? target!.id : null,
+      index: movingToNewClient ? _nextIndexIn(target!.id) : null,
+    );
+    _persist((cloud) => cloud.updateVisit(_visits[index]));
+
+    // Both packages can change state when an attended visit moves
+    // between them: the one it left may reopen, the one it joined may
+    // close. Neither is a moment to celebrate — she is fixing a booking.
+    final changedTargets = <ClientPackage?>[
+      _reconcilePackage(visit.packageId),
+      if (movingToNewClient) _reconcilePackage(target!.id),
+    ];
+    for (final pkg in changedTargets.nonNulls) {
+      _persist((cloud) => cloud.updatePackage(pkg));
+    }
+
+    notifyListeners();
+    return true;
+  }
+
+  /// Cancels an appointment outright — she booked it by mistake, or it
+  /// will never happen. Deleting one she had marked حضرت gives that
+  /// visit back to the package, reopening it if it had been closed.
+  void deleteVisit(String visitId) {
+    final index = _visits.indexWhere((v) => v.id == visitId);
+    if (index < 0) return;
+    final visit = _visits.removeAt(index);
+    _persist((cloud) => cloud.deleteVisit(visitId));
+
+    final changed = _reconcilePackage(visit.packageId);
+    if (changed != null) _persist((cloud) => cloud.updatePackage(changed));
+    notifyListeners();
+  }
+
+  /// The next free slot number in a package — appointments booked beyond
+  /// the ones sold with it keep counting up rather than colliding.
+  int _nextIndexIn(String packageId) {
+    final existing = visitsForPackage(packageId);
+    return existing.isEmpty ? 1 : existing.last.index + 1;
+  }
+
+  /// Days in [month] that have at least one appointment — the dots on
+  /// the calendar grid.
+  Set<int> scheduledDaysIn(DateTime month) => {
+        for (final visit in _visits)
+          if (visit.scheduledAt.year == month.year &&
+              visit.scheduledAt.month == month.month)
+            visit.scheduledAt.day,
+      };
+
+  /// Appointments still to happen, soonest first — what "القادمة" lists.
+  List<Visit> get upcomingVisits {
+    final today = DateTime(now.year, now.month, now.day);
+    return _visits
+        .where((v) => !v.isResolved && !v.scheduledAt.isBefore(today))
+        .toList()
+      ..sort(_byScheduleThenIndex);
   }
 }
 

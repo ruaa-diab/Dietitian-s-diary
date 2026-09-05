@@ -1,5 +1,7 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../data/app_store.dart';
 import '../data/practice_profile.dart';
 import '../data/store_scope.dart';
 import '../theme/app_colors.dart';
@@ -8,8 +10,9 @@ import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
 
-/// حسابي — the dietitian's own page: who she is, and how the practice is
-/// doing at a glance.
+/// حسابي — the dietitian's own page: who she is, how the practice is
+/// doing at a glance, and the two things about her account she can
+/// change — her name and her password.
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
@@ -80,6 +83,8 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
+        const _AccountCard(),
+        const SizedBox(height: 14),
         AppCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -87,7 +92,9 @@ class ProfileScreen extends StatelessWidget {
               Text('الباقات', style: AppText.sectionTitle),
               const SizedBox(height: 6),
               Text(
-                'تُباع الباقة من ملف العميلة، أو من زر «تجديد» في الملخص.',
+                'الباقة الواحدة ${ArabicDates.visits(AppStore.defaultPackage.visitCount)}'
+                ' بـ ${fmtCurrency(AppStore.defaultPackage.price)}.'
+                ' تُباع من ملف العميلة، أو من زر «تجديد» في الملخص.',
                 style: AppText.bodyLarge,
               ),
             ],
@@ -113,6 +120,7 @@ class _IdentityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
     return AppCard(
       padding: const EdgeInsets.all(22),
       radius: 26,
@@ -134,7 +142,7 @@ class _IdentityCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  PracticeProfile.dietitianName,
+                  store.dietitianName,
                   style: AppText.pageHeadline,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -153,6 +161,283 @@ class _IdentityCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The account itself: the address she signs in with, and the two things
+/// she can change about it.
+class _AccountCard extends StatelessWidget {
+  const _AccountCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final email = store.accountEmail;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('الحساب', style: AppText.sectionTitle),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('البريد الإلكتروني', style: AppText.rowTitle),
+              Flexible(
+                child: Text(
+                  email ?? '—',
+                  style: AppText.metaSmall,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SecondaryButton(
+            label: 'تعديل الاسم',
+            onPressed: () => EditNameSheet.show(context),
+          ),
+          const SizedBox(height: 10),
+          SecondaryButton(
+            label: 'تغيير كلمة المرور',
+            onPressed: () => ChangePasswordSheet.show(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Renames her. The name shows on حسابي, on the welcome screen's greeting
+/// and on the progress card she shares, and it is stored with her data,
+/// so it follows her to every device.
+class EditNameSheet extends StatefulWidget {
+  const EditNameSheet({super.key});
+
+  static Future<void> show(BuildContext context) => showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: AppColors.card,
+        showDragHandle: true,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        builder: (_) => const EditNameSheet(),
+      );
+
+  @override
+  State<EditNameSheet> createState() => _EditNameSheetState();
+}
+
+class _EditNameSheetState extends State<EditNameSheet> {
+  late final TextEditingController _name;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: StoreScope.read(context).dietitianName);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    StoreScope.read(context).updateDietitianName(_name.text);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('تعديل الاسم', style: AppText.navTitle),
+              const SizedBox(height: 20),
+              const FieldLabel('الاسم'),
+              AppTextField(
+                controller: _name,
+                hint: PracticeProfile.dietitianName,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 24),
+              PrimaryButton(
+                label: 'حفظ',
+                onPressed: _name.text.trim().isEmpty ? null : _save,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Changes the account password. The current one is asked for because
+/// Firebase requires a recent sign-in before it will accept a new
+/// password — and because a phone left unlocked shouldn't be enough to
+/// lock her out of her own account.
+class ChangePasswordSheet extends StatefulWidget {
+  const ChangePasswordSheet({super.key});
+
+  static Future<void> show(BuildContext context) => showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: AppColors.card,
+        showDragHandle: true,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        builder: (_) => const ChangePasswordSheet(),
+      );
+
+  @override
+  State<ChangePasswordSheet> createState() => _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends State<ChangePasswordSheet> {
+  final _current = TextEditingController();
+  final _next = TextEditingController();
+  final _confirm = TextEditingController();
+  String? _error;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    for (final controller in [_current, _next, _confirm]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final current = _current.text;
+    final next = _next.text;
+
+    if (current.isEmpty || next.isEmpty) {
+      setState(() => _error = 'أدخلي كلمة المرور الحالية والجديدة.');
+      return;
+    }
+    if (next.length < 6) {
+      setState(() => _error = 'كلمة المرور الجديدة ٦ خانات على الأقل.');
+      return;
+    }
+    if (next != _confirm.text) {
+      setState(() => _error = 'كلمتا المرور غير متطابقتين.');
+      return;
+    }
+
+    setState(() {
+      _error = null;
+      _submitting = true;
+    });
+
+    final store = StoreScope.read(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      await store.changePassword(currentPassword: current, newPassword: next);
+      if (!mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(const SnackBar(content: Text('تم تغيير كلمة المرور')));
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _messageFor(error.code);
+        _submitting = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'تعذّر تغيير كلمة المرور. حاولي مرة أخرى.';
+        _submitting = false;
+      });
+    }
+  }
+
+  String _messageFor(String code) {
+    return switch (code) {
+      // A wrong current password comes back under whichever of these the
+      // installed SDK version uses.
+      'wrong-password' ||
+      'invalid-credential' ||
+      'user-mismatch' =>
+        'كلمة المرور الحالية غير صحيحة.',
+      'weak-password' => 'كلمة المرور الجديدة ضعيفة. اختاري واحدة أطول.',
+      'requires-recent-login' => 'لأمانك، سجّلي الخروج ثم الدخول وحاولي مرة أخرى.',
+      'too-many-requests' => 'محاولات كثيرة متتالية. حاولي بعد قليل.',
+      'network-request-failed' => 'تحققي من اتصال الإنترنت وحاولي مرة أخرى.',
+      _ => 'تعذّر تغيير كلمة المرور. حاولي مرة أخرى.',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('تغيير كلمة المرور', style: AppText.navTitle),
+              const SizedBox(height: 20),
+              const FieldLabel('كلمة المرور الحالية'),
+              AppTextField(
+                controller: _current,
+                hint: '••••••••',
+                obscureText: true,
+                onChanged: (_) => _clearError(),
+              ),
+              const SizedBox(height: 16),
+              const FieldLabel('كلمة المرور الجديدة'),
+              AppTextField(
+                controller: _next,
+                hint: '••••••••',
+                obscureText: true,
+                onChanged: (_) => _clearError(),
+              ),
+              const SizedBox(height: 16),
+              const FieldLabel('تأكيد كلمة المرور الجديدة'),
+              AppTextField(
+                controller: _confirm,
+                hint: '••••••••',
+                obscureText: true,
+                onChanged: (_) => _clearError(),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: AppText.metaSmall.copyWith(color: AppColors.clayDark),
+                ),
+              ],
+              const SizedBox(height: 24),
+              PrimaryButton(
+                label: 'حفظ كلمة المرور',
+                onPressed: _submitting ? null : _save,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _clearError() {
+    if (_error != null) setState(() => _error = null);
   }
 }
 

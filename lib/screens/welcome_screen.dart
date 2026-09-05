@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/practice_profile.dart';
 import '../data/store_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -21,6 +20,7 @@ class WelcomeScreen extends StatelessWidget {
     final store = StoreScope.of(context);
     final today = DateTime.now();
     final pending = store.todayVisits.where((v) => !v.isResolved).length;
+    final upcoming = store.upcomingVisits.length;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -50,7 +50,7 @@ class WelcomeScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('أهلاً بعودتك', style: AppText.bodyLarge),
-                        Text(PracticeProfile.firstName, style: AppText.pageHeadline),
+                        Text(store.dietitianFirstName, style: AppText.pageHeadline),
                       ],
                     ),
                   ),
@@ -72,6 +72,17 @@ class WelcomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     _NavOption(
+                      icon: AppIcons.clock,
+                      color: AppColors.honeyText,
+                      background: AppColors.honeyBg,
+                      title: 'المواعيد',
+                      subtitle: upcoming > 0
+                          ? '${ArabicDates.visits(upcoming)} قادمة'
+                          : 'لا مواعيد قادمة',
+                      onTap: () => _open(context, AppTab.schedule),
+                    ),
+                    const SizedBox(height: 12),
+                    _NavOption(
                       icon: AppIcons.person,
                       color: AppColors.sageText,
                       background: AppColors.sageBgAlt,
@@ -82,8 +93,8 @@ class WelcomeScreen extends StatelessWidget {
                     const SizedBox(height: 12),
                     _NavOption(
                       icon: AppIcons.plus,
-                      color: AppColors.honeyText,
-                      background: AppColors.honeyBg,
+                      color: AppColors.sageDark,
+                      background: AppColors.sageBg,
                       title: 'باقة جديدة',
                       subtitle: 'بيع باقة زيارات لعميلة',
                       onTap: () => _open(context, AppTab.newPackage),

@@ -87,6 +87,7 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
                         packageNumber: history.length,
                         days: days,
                         attendedVisits: store.attendedCount(package.id),
+                        byline: store.dietitianByline,
                       ),
                     ),
                   ),

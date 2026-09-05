@@ -5,10 +5,11 @@ import '../widgets/app_bottom_nav.dart';
 import 'clients_screen.dart';
 import 'new_package_screen.dart';
 import 'profile_screen.dart';
+import 'schedule_screen.dart';
 import 'summary_screen.dart';
 import 'today_screen.dart';
 
-/// Holds the five tabbed screens and the bottom navigation.
+/// Holds the tabbed screens and the bottom navigation.
 ///
 /// باقة جديدة is a tab of its own, and also opens pushed with a client
 /// already chosen — from a client's file, a "تجديد" button in the
@@ -41,6 +42,7 @@ class _HomeShellState extends State<HomeShell> {
           index: AppTab.values.indexOf(_tab),
           children: [
             const TodayScreen(),
+            const ScheduleScreen(),
             const ClientsScreen(),
             // Saving from the tab has nowhere to pop to, so it hands the
             // shell back to today's list instead.

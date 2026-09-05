@@ -35,7 +35,43 @@ class CloudStore {
       .snapshots()
       .map((snap) => snap.docs.map((doc) => _visitFromDoc(doc.id, doc.data())).toList());
 
+  /// Her own name, as she has edited it — null while she is still on the
+  /// default, since nothing has been written yet.
+  ///
+  /// Lives at `practices/{uid}/settings/profile`, which the same security
+  /// rule already covers: it matches `practices/{uid}/{collection}/{docId}`
+  /// with `settings` as the collection.
+  Stream<String?> watchDietitianName() =>
+      _profile.snapshots().map((snap) => snap.data()?['dietitianName'] as String?);
+
+  Future<void> saveDietitianName(String name) =>
+      _profile.set(<String, Object?>{'dietitianName': name}, SetOptions(merge: true));
+
+  DocumentReference<Map<String, Object?>> get _profile =>
+      _firestore.doc('practices/$uid/settings/profile');
+
   Future<void> insertClient(Client client) => _clients.doc(client.id).set(_clientToDoc(client));
+
+  Future<void> updateClient(Client client) => _clients.doc(client.id).set(_clientToDoc(client));
+
+  /// Deletes a client and everything of hers in one batch, so a dropped
+  /// connection can't leave her visits behind on a schedule she is no
+  /// longer on. Her payments go with her packages, which hold them.
+  Future<void> deleteClient({
+    required String clientId,
+    required List<String> packageIds,
+    required List<String> visitIds,
+  }) async {
+    final batch = _firestore.batch();
+    batch.delete(_clients.doc(clientId));
+    for (final id in packageIds) {
+      batch.delete(_packages.doc(id));
+    }
+    for (final id in visitIds) {
+      batch.delete(_visits.doc(id));
+    }
+    await batch.commit();
+  }
 
   Future<void> insertPackage(ClientPackage package) =>
       _packages.doc(package.id).set(_packageToDoc(package));
@@ -54,6 +90,8 @@ class CloudStore {
   }
 
   Future<void> updateVisit(Visit visit) => _visits.doc(visit.id).set(_visitToDoc(visit));
+
+  Future<void> deleteVisit(String visitId) => _visits.doc(visitId).delete();
 
   /// Marking the visit that completes a package writes both documents —
   /// the visit and the package it closes — in one batch, so a dropped

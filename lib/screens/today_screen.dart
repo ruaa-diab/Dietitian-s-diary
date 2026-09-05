@@ -8,6 +8,7 @@ import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/illustrations.dart';
 import '../widgets/line_icon.dart';
+import 'appointment_sheet.dart';
 import 'client_detail_screen.dart';
 import 'package_complete_screen.dart';
 
@@ -95,7 +96,11 @@ class _VisitCard extends StatelessWidget {
 
     final pkg = store.package(visit.packageId);
     final attended = store.attendedCount(pkg.id);
-    final isFinalVisit = visit.index == pkg.visitCount;
+    // Which visit of the package this one would be if she attends — not
+    // the slot it was booked into. A missed appointment left the count
+    // where it was, so this may well be a number she has seen before.
+    final visitNumber = store.visitNumber(visit) ?? attended + 1;
+    final isFinalVisit = visitNumber == pkg.visitCount;
 
     return AppCard(
       child: Column(
@@ -134,7 +139,7 @@ class _VisitCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      'الزيارة ${fmtInt(visit.index)} من ${fmtInt(pkg.visitCount)}',
+                      'الزيارة ${fmtInt(visitNumber)} من ${fmtInt(pkg.visitCount)}',
                       style: AppText.pill.copyWith(
                         // The closing visit of a package is called out in sage.
                         color: isFinalVisit ? AppColors.sage : AppColors.textMuted,
@@ -206,7 +211,9 @@ class _ResolvedVisitRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final attended = visit.status == VisitStatus.attended;
-    final label = attended ? 'حضرت' : 'لم تحضر';
+    // The note is spelled out on the row itself, so "لم تحضر" never reads
+    // as a visit spent — she keeps all four.
+    final label = attended ? 'حضرت' : 'لم تحضر · لم تُحتسب';
 
     return Material(
       color: attended ? AppColors.sageBgAlt : AppColors.dueBg,
@@ -246,6 +253,8 @@ class _ResolvedVisitRow extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       '$label · ${ArabicDates.time(visit.scheduledAt)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppText.meta.copyWith(
                         fontWeight: FontWeight.w500,
                         color: attended ? AppColors.sageText : AppColors.clayDark,
@@ -301,7 +310,7 @@ class _TodayEmpty extends StatelessWidget {
                     label: 'إضافة موعد',
                     height: 58,
                     expand: false,
-                    onPressed: () => AddAppointmentSheet.show(context),
+                    onPressed: () => AppointmentSheet.show(context),
                   ),
                 ],
               ),
@@ -310,97 +319,5 @@ class _TodayEmpty extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-/// Books an extra visit against a client's running package.
-class AddAppointmentSheet extends StatelessWidget {
-  const AddAppointmentSheet({super.key});
-
-  static Future<void> show(BuildContext context) => showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: AppColors.card,
-        showDragHandle: true,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        builder: (_) => const AddAppointmentSheet(),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final store = StoreScope.of(context);
-    final candidates = store.clients
-        .where((c) => store.remainingForClient(c.id) > 0)
-        .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
-
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.7,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-              child: Text('إضافة موعد اليوم', style: AppText.navTitle),
-            ),
-            if (candidates.isEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                child: Text(
-                  'لا توجد عميلة لديها زيارات متبقية. ابدئي بباقة جديدة أولاً.',
-                  style: AppText.bodyLarge,
-                ),
-              )
-            else
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                  itemCount: candidates.length,
-                  separatorBuilder: (_, __) => const RowDivider(
-                    margin: EdgeInsets.symmetric(vertical: 6),
-                  ),
-                  itemBuilder: (context, index) {
-                    final client = candidates[index];
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: ClientAvatar(name: client.name, seed: client.id, size: 44),
-                      title: Text(client.name, style: AppText.rowTitle),
-                      subtitle: Text(
-                        '${fmtInt(store.remainingForClient(client.id))} متبقية',
-                        style: AppText.metaSmall,
-                      ),
-                      onTap: () => _pickTime(context, client),
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickTime(BuildContext context, Client client) async {
-    final store = StoreScope.read(context);
-    final navigator = Navigator.of(context);
-    final time = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 10, minute: 0),
-    );
-    if (time == null) return;
-
-    final now = DateTime.now();
-    store.scheduleVisit(
-      clientId: client.id,
-      at: DateTime(now.year, now.month, now.day, time.hour, time.minute),
-    );
-    navigator.pop();
   }
 }
