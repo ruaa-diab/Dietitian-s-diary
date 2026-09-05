@@ -9,7 +9,6 @@ import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
 import '../widgets/revenue_bars.dart';
 import 'client_detail_screen.dart';
-import 'new_package_screen.dart';
 import 'record_payment_sheet.dart';
 
 /// Screen 05 — the month at a glance.
@@ -20,7 +19,7 @@ class SummaryScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final renewals = store.needsRenewal;
-    final outstanding = store.outstandingPackages;
+    final outstanding = store.outstandingClients;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
@@ -43,7 +42,7 @@ class SummaryScreen extends StatelessWidget {
           _RenewalsCard(renewals: renewals),
           const SizedBox(height: 14),
         ],
-        if (outstanding.isNotEmpty) _BalancesCard(packages: outstanding),
+        if (outstanding.isNotEmpty) _BalancesCard(clients: outstanding),
       ],
     );
   }
@@ -193,7 +192,7 @@ class _StatTile extends StatelessWidget {
 class _RenewalsCard extends StatelessWidget {
   const _RenewalsCard({required this.renewals});
 
-  final List<({Client client, ClientPackage package})> renewals;
+  final List<Client> renewals;
 
   @override
   Widget build(BuildContext context) {
@@ -203,9 +202,9 @@ class _RenewalsCard extends StatelessWidget {
         children: [
           Text('تحتاج تجديد', style: AppText.sectionTitle),
           const SizedBox(height: 14),
-          for (final entry in renewals) ...[
-            _RenewalRow(client: entry.client, package: entry.package),
-            if (entry != renewals.last) const SizedBox(height: 12),
+          for (final client in renewals) ...[
+            _RenewalRow(client: client),
+            if (client != renewals.last) const SizedBox(height: 12),
           ],
         ],
       ),
@@ -214,23 +213,29 @@ class _RenewalsCard extends StatelessWidget {
 }
 
 class _RenewalRow extends StatelessWidget {
-  const _RenewalRow({required this.client, required this.package});
+  const _RenewalRow({required this.client});
 
   final Client client;
-  final ClientPackage package;
 
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final attended = store.attendedCount(package.id);
-    final ended = package.endDate;
-    final daysSince = ended == null ? null : ArabicDates.daysBetween(ended, DateTime.now());
+    final due = store.balanceDueFor(client.id);
+    final lastVisit = store
+        .visitsForClient(client.id)
+        .where((v) => v.status == VisitStatus.attended)
+        .firstOrNull
+        ?.scheduledAt;
+    final daysSince =
+        lastVisit == null ? null : ArabicDates.daysBetween(lastVisit, DateTime.now());
 
-    final subtitle = switch (daysSince) {
-      null => 'انتهت الباقة',
-      0 => 'أكملت ${fmtInt(attended)} من ${fmtInt(package.visitCount)}',
-      final int days => 'انتهت منذ ${ArabicDates.days(days)}',
-    };
+    final subtitle = due > 0
+        ? 'أكملت باقتها · ${fmtCurrency(due)} مستحقة'
+        : switch (daysSince) {
+            null => 'أكملت باقتها',
+            0 => 'أكملت باقتها اليوم',
+            final int days => 'آخر زيارة منذ ${ArabicDates.days(days)}',
+          };
 
     return Row(
       children: [
@@ -269,11 +274,7 @@ class _RenewalRow extends StatelessWidget {
         SizedBox(
           height: 44,
           child: OutlinedButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => NewPackageScreen(clientId: client.id),
-              ),
-            ),
+            onPressed: () => RecordPaymentSheet.show(context, clientId: client.id),
             style: OutlinedButton.styleFrom(
               backgroundColor: AppColors.card,
               foregroundColor: AppColors.textPrimary,
@@ -281,7 +282,7 @@ class _RenewalRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            child: Text('تجديد', style: AppText.buttonSmall),
+            child: Text('دفعة', style: AppText.buttonSmall),
           ),
         ),
       ],
@@ -290,9 +291,9 @@ class _RenewalRow extends StatelessWidget {
 }
 
 class _BalancesCard extends StatelessWidget {
-  const _BalancesCard({required this.packages});
+  const _BalancesCard({required this.clients});
 
-  final List<ClientPackage> packages;
+  final List<Client> clients;
 
   @override
   Widget build(BuildContext context) {
@@ -304,10 +305,10 @@ class _BalancesCard extends StatelessWidget {
         children: [
           Text('أرصدة مستحقة', style: AppText.sectionTitle),
           const SizedBox(height: 14),
-          for (final pkg in packages) ...[
+          for (final client in clients) ...[
             InkWell(
               borderRadius: BorderRadius.circular(12),
-              onTap: () => RecordPaymentSheet.show(context, packageId: pkg.id),
+              onTap: () => RecordPaymentSheet.show(context, clientId: client.id),
               child: Row(
                 children: [
                   Expanded(
@@ -315,25 +316,28 @@ class _BalancesCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          store.client(pkg.clientId).name,
+                          client.name,
                           style: AppText.rowTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'باقة ${ArabicDates.dayMonth(pkg.startDate)}',
+                          '${ArabicDates.visits(store.attendedCount(client.id))}'
+                          ' · ${ArabicDates.packages(store.packagesOwedBy(client.id))} مستحقة',
                           style: AppText.metaSmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text(fmtCurrency(pkg.balanceDue), style: AppText.amountSmall),
+                  Text(fmtCurrency(store.balanceDueFor(client.id)), style: AppText.amountSmall),
                 ],
               ),
             ),
-            if (pkg != packages.last) const RowDivider(),
+            if (client != clients.last) const RowDivider(),
           ],
         ],
       ),

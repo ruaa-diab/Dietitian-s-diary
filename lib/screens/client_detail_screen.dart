@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_store.dart';
 import '../data/store_scope.dart';
 import '../models/models.dart';
 import '../theme/app_colors.dart';
@@ -8,7 +9,7 @@ import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/line_icon.dart';
 import 'new_client_sheet.dart';
-import 'new_package_screen.dart';
+import 'appointment_sheet.dart';
 import 'progress_card_screen.dart';
 import 'record_payment_sheet.dart';
 
@@ -76,7 +77,7 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-enum _ClientAction { newPackage, editClient, shareProgress, deleteClient }
+enum _ClientAction { bookVisit, recordPayment, editClient, shareProgress, deleteClient }
 
 class _OverflowMenu extends StatelessWidget {
   const _OverflowMenu({required this.client});
@@ -94,8 +95,12 @@ class _OverflowMenu extends StatelessWidget {
       onSelected: (action) => _run(context, action),
       itemBuilder: (context) => [
         PopupMenuItem(
-          value: _ClientAction.newPackage,
-          child: Text('باقة جديدة', style: AppText.rowTitleSmall),
+          value: _ClientAction.bookVisit,
+          child: Text('موعد جديد', style: AppText.rowTitleSmall),
+        ),
+        PopupMenuItem(
+          value: _ClientAction.recordPayment,
+          child: Text('تسجيل دفعة', style: AppText.rowTitleSmall),
         ),
         PopupMenuItem(
           value: _ClientAction.editClient,
@@ -118,10 +123,10 @@ class _OverflowMenu extends StatelessWidget {
 
   void _run(BuildContext context, _ClientAction action) {
     switch (action) {
-      case _ClientAction.newPackage:
-        Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => NewPackageScreen(clientId: client.id),
-        ));
+      case _ClientAction.recordPayment:
+        RecordPaymentSheet.show(context, clientId: client.id);
+      case _ClientAction.bookVisit:
+        AppointmentSheet.show(context, initialClientId: client.id);
       case _ClientAction.editClient:
         NewClientSheet.show(context, client: client);
       case _ClientAction.shareProgress:
@@ -149,9 +154,10 @@ class _OverflowMenu extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: Text('إلغاء', style: AppText.textButton.copyWith(
-              color: AppColors.textSecondary,
-            )),
+            child: Text(
+              'إلغاء',
+              style: AppText.textButton.copyWith(color: AppColors.textSecondary),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -220,40 +226,40 @@ class _SummaryChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final active = store.activePackage(client.id);
-    final latest = store.latestPackage(client.id);
+    final attended = store.attendedCount(client.id);
+    final perPackage = AppStore.packageRate.visitCount;
+    final remaining = store.remainingVisits(client.id);
 
-    String? progressLabel;
-    if (active != null) {
-      final attended = store.attendedCount(active.id);
-      progressLabel = attended >= active.visitCount
-          ? 'اكتملت الباقة'
-          : 'الزيارة ${fmtInt(attended + 1)} من ${fmtInt(active.visitCount)}';
-    } else if (latest != null) {
-      progressLabel = 'تحتاج تجديد';
-    }
+    final progressLabel = attended == 0
+        ? 'لم تبدأ بعد'
+        : remaining == 0
+        ? 'أكملت باقتها'
+        : 'الزيارة ${fmtInt(store.visitInPackage(client.id))} من ${fmtInt(perPackage)}';
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
         StatusPill(
-          label: 'بدأت ${ArabicDates.dayMonth(latest?.startDate ?? client.startDate)}',
+          label: 'بدأت ${ArabicDates.dayMonth(client.startDate)}',
           background: AppColors.card,
           foreground: AppColors.textSecondary,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           textStyle: AppText.pillMuted,
         ),
-        if (progressLabel != null)
-          StatusPill.due(
-            progressLabel,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          ),
+        StatusPill.due(
+          progressLabel,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        ),
         // The number she is really asking about: how many visits are left
-        // before she has to buy again.
-        if (active != null)
-          StatusPill.success(
-            '${fmtInt(store.remainingVisits(active.id))} متبقية',
+        // before the next ١٠٠ ₪ is due.
+        StatusPill.success(
+          remaining == 0 ? 'الباقة التالية' : '${fmtInt(remaining)} متبقية',
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        ),
+        if (client.priorVisits > 0)
+          StatusPill.neutral(
+            '${fmtInt(client.priorVisits)} زيارة سابقة',
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           ),
       ],
@@ -272,8 +278,8 @@ class _MoneyCard extends StatelessWidget {
     final store = StoreScope.of(context);
     final due = store.balanceDueFor(client.id);
     final settled = due <= 0;
-    final unpaid = store.packagesFor(client.id).where((p) => !p.isPaid).toList();
     final lastPayment = store.lastPaymentFor(client.id);
+    final owed = store.packagesOwedBy(client.id);
     final payments = store.paymentsFor(client.id);
 
     return AppCard(
@@ -324,7 +330,7 @@ class _MoneyCard extends StatelessWidget {
                   lastPayment == null
                       ? 'لم تدفع بعد'
                       : '${ArabicDates.dayMonth(lastPayment.date)}'
-                          ' · ${fmtCurrency(lastPayment.amount)}',
+                            ' · ${fmtCurrency(lastPayment.amount)}',
                   style: AppText.rowTitleSmall,
                   textAlign: TextAlign.end,
                   maxLines: 1,
@@ -338,17 +344,39 @@ class _MoneyCard extends StatelessWidget {
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: StatusPill.due(
-                lastPayment == null ? 'لم تدفع شيئاً من الباقة' : 'دفعة مؤجَّلة',
+                owed > 1
+                    ? 'متأخرة بـ${ArabicDates.packages(owed)}'
+                    : (lastPayment == null && client.priorPaid == 0
+                          ? 'لم تدفع بعد'
+                          : 'دفعة مؤجَّلة'),
                 textStyle: AppText.pillSmall,
               ),
             ),
           ],
+          const SizedBox(height: 10),
+          // Where the balance comes from, spelled out — four visits to a
+          // package, so the number is never a mystery.
+          Text(
+            '${ArabicDates.visits(store.attendedCount(client.id))}'
+            ' · ${ArabicDates.packages(store.packagesUsed(client.id))}'
+            ' × ${fmtCurrency(AppStore.packageRate.price)}'
+            ' = ${fmtCurrency(store.amountChargedFor(client.id))}'
+            ' · دُفع ${fmtCurrency(store.amountPaidFor(client.id))}',
+            style: AppText.metaSmall,
+          ),
           if (payments.isNotEmpty) ...[
             const RowDivider(),
             Text('الدفعات', style: AppText.sectionTitle),
             const SizedBox(height: 8),
-            for (final payment in payments)
-              _PaymentRow(client: client, payment: payment),
+            for (final payment in payments) _PaymentRow(client: client, payment: payment),
+            if (client.priorPaid > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  'دفعات سابقة (قبل التسجيل هنا) · ${fmtCurrency(client.priorPaid)}',
+                  style: AppText.metaSmall,
+                ),
+              ),
           ],
           const SizedBox(height: 14),
           PrimaryButton(
@@ -356,9 +384,7 @@ class _MoneyCard extends StatelessWidget {
             height: 54,
             radius: 16,
             textStyle: AppText.buttonMedium.copyWith(color: AppColors.card),
-            onPressed: unpaid.isEmpty
-                ? null
-                : () => RecordPaymentSheet.show(context, packageId: unpaid.first.id),
+            onPressed: () => RecordPaymentSheet.show(context, clientId: client.id),
           ),
         ],
       ),
@@ -376,28 +402,32 @@ class _PaymentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '${ArabicDates.dayMonth(payment.date)} · ${payment.method.label}',
-              style: AppText.metaSmall,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    return InkWell(
+      onTap: () => RecordPaymentSheet.show(context, clientId: client.id, paymentId: payment.id),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${ArabicDates.dayMonth(payment.date)} · ${payment.method.label}',
+                style: AppText.metaSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Text(fmtCurrency(payment.amount), style: AppText.rowTitleSmall),
-          IconAction(
-            icon: AppIcons.trash,
-            size: 20,
-            color: AppColors.textTertiary,
-            tooltip: 'حذف الدفعة',
-            onPressed: () => _confirmDelete(context),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Text(fmtCurrency(payment.amount), style: AppText.rowTitleSmall),
+            IconAction(
+              icon: AppIcons.trash,
+              size: 20,
+              color: AppColors.textTertiary,
+              tooltip: 'حذف الدفعة',
+              onPressed: () => _confirmDelete(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -430,7 +460,7 @@ class _PaymentRow extends StatelessWidget {
       ),
     );
     if (confirmed != true) return;
-    store.deletePayment(packageId: payment.packageId, paymentId: payment.id);
+    store.deletePayment(payment.id);
   }
 }
 
@@ -473,31 +503,35 @@ class _VisitRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final pkg = store.package(visit.packageId);
+    final perPackage = AppStore.packageRate.visitCount;
     final number = store.visitNumber(visit);
 
-    final (Color background, Color foreground, String badge, String note) =
-        switch (visit.status) {
+    final (
+      Color background,
+      Color foreground,
+      String badge,
+      String note,
+    ) = switch (visit.status) {
       VisitStatus.attended => (
-          AppColors.sageBgAlt,
-          AppColors.sageText,
-          fmtInt(number!),
-          'حضرت · الزيارة ${fmtInt(number)} من ${fmtInt(pkg.visitCount)}',
-        ),
+        AppColors.sageBgAlt,
+        AppColors.sageText,
+        fmtInt(number!),
+        'حضرت · الزيارة ${fmtInt(number)} من ${fmtInt(perPackage)}',
+      ),
       // A dash, not a number: a missed appointment took no slot in the
       // package, so there is no "visit N" for it to be.
       VisitStatus.noShow => (
-          AppColors.dueBg,
-          AppColors.clayDark,
-          '—',
-          'لم تحضر · لم تُحتسب من الباقة',
-        ),
+        AppColors.dueBg,
+        AppColors.clayDark,
+        '—',
+        'لم تحضر · لم تُحتسب من الباقة',
+      ),
       VisitStatus.scheduled => (
-          AppColors.divider,
-          AppColors.textMuted,
-          fmtInt(number ?? visit.index),
-          'موعد لم يُسجَّل بعد',
-        ),
+        AppColors.divider,
+        AppColors.textMuted,
+        fmtInt(number ?? 1),
+        'موعد لم يُسجَّل بعد',
+      ),
     };
 
     return Row(
@@ -506,10 +540,7 @@ class _VisitRow extends StatelessWidget {
           width: 42,
           height: 42,
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(14),
-          ),
+          decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(14)),
           child: Text(badge, style: AppText.packageIndex.copyWith(color: foreground)),
         ),
         const SizedBox(width: 12),
@@ -525,7 +556,12 @@ class _VisitRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 2),
-              Text(note, style: AppText.metaSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                note,
+                style: AppText.metaSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -577,10 +613,7 @@ class VisitStatusSheet extends StatelessWidget {
           children: [
             Text('تعديل الزيارة', style: AppText.navTitle),
             const SizedBox(height: 4),
-            Text(
-              ArabicDates.weekdayDayMonth(visit.scheduledAt),
-              style: AppText.metaSmall,
-            ),
+            Text(ArabicDates.weekdayDayMonth(visit.scheduledAt), style: AppText.metaSmall),
             const SizedBox(height: 18),
             _StatusChoice(
               label: 'حضرت',
@@ -659,8 +692,7 @@ class _StatusChoice extends StatelessWidget {
                   ],
                 ),
               ),
-              if (selected)
-                LineIcon(AppIcons.check, color: AppColors.sage, size: 24),
+              if (selected) LineIcon(AppIcons.check, color: AppColors.sage, size: 24),
             ],
           ),
         ),
@@ -669,6 +701,13 @@ class _StatusChoice extends StatelessWidget {
   }
 }
 
+/// The packages her visits have added up to.
+///
+/// There are no package records to list any more, so this is worked out:
+/// her attended visits in date order, cut into fours. Each block shows
+/// the span it covered and whether her payments have reached it yet —
+/// money is a running total, so the first ١٠٠ ₪ settles the first
+/// package whatever she was thinking of when she handed it over.
 class _PackageHistoryCard extends StatelessWidget {
   const _PackageHistoryCard({required this.client});
 
@@ -677,40 +716,89 @@ class _PackageHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final history = store.packagesFor(client.id);
+    final perPackage = AppStore.packageRate.visitCount;
+    final price = AppStore.packageRate.price;
+    final paid = store.amountPaidFor(client.id);
+
+    // Oldest first, so the first four are the first package.
+    final attended = store
+        .visitsForClient(client.id)
+        .where((v) => v.status == VisitStatus.attended)
+        .toList()
+        .reversed
+        .toList();
+    final total = store.packagesUsed(client.id);
 
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('سجل الباقات', style: AppText.sectionTitle),
+          Text('الباقات', style: AppText.sectionTitle),
           const SizedBox(height: 14),
-          if (history.isEmpty)
-            Text('لا توجد باقات بعد.', style: AppText.metaSmall)
+          if (total == 0)
+            Text('لم تبدأ أي باقة بعد.', style: AppText.metaSmall)
           else
-            for (final pkg in history) ...[
-              _PackageRow(
-                package: pkg,
-                // Numbered oldest-first, so the first package sold is ١.
-                index: history.length - history.indexOf(pkg),
+            for (var block = total; block >= 1; block--) ...[
+              _PackageBlockRow(
+                number: block,
+                // Visits in this block that have dates here. A client
+                // carried in with prior visits has fewer dated ones than
+                // her count implies, and the earliest blocks may have
+                // none at all — which the row says rather than inventing.
+                dates: _datesForBlock(attended, client.priorVisits, block, perPackage),
+                size: perPackage,
+                isPaid: paid >= block * price,
+                isCurrent: block == total && store.remainingVisits(client.id) > 0,
               ),
-              if (pkg != history.last) const RowDivider(),
+              if (block > 1) const RowDivider(),
             ],
         ],
       ),
     );
   }
+
+  /// The dated visits falling in package [block], accounting for any
+  /// undated ones carried in with the client.
+  static List<DateTime> _datesForBlock(
+    List<Visit> attended,
+    int priorVisits,
+    int block,
+    int perPackage,
+  ) {
+    final from = (block - 1) * perPackage;
+    final to = block * perPackage;
+    final dates = <DateTime>[];
+    for (var i = 0; i < attended.length; i++) {
+      final position = priorVisits + i;
+      if (position >= from && position < to) dates.add(attended[i].scheduledAt);
+    }
+    return dates;
+  }
 }
 
-class _PackageRow extends StatelessWidget {
-  const _PackageRow({required this.package, required this.index});
+class _PackageBlockRow extends StatelessWidget {
+  const _PackageBlockRow({
+    required this.number,
+    required this.dates,
+    required this.size,
+    required this.isPaid,
+    required this.isCurrent,
+  });
 
-  final ClientPackage package;
-  final int index;
+  final int number;
+  final List<DateTime> dates;
+  final int size;
+  final bool isPaid;
+  final bool isCurrent;
 
   @override
   Widget build(BuildContext context) {
-    final active = package.isActive;
+    final span = dates.isEmpty
+        ? 'زيارات سابقة'
+        : dates.length == 1
+        ? ArabicDates.dayMonth(dates.first)
+        : '${ArabicDates.dayMonth(dates.first)} — ${ArabicDates.dayMonth(dates.last)}';
+
     return Row(
       children: [
         Container(
@@ -718,13 +806,13 @@ class _PackageRow extends StatelessWidget {
           height: 42,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: active ? AppColors.sageBgAlt : AppColors.divider,
+            color: isCurrent ? AppColors.sageBgAlt : AppColors.divider,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Text(
-            fmtInt(index),
+            fmtInt(number),
             style: AppText.packageIndex.copyWith(
-              color: active ? AppColors.sageText : AppColors.textMuted,
+              color: isCurrent ? AppColors.sageText : AppColors.textMuted,
             ),
           ),
         ),
@@ -734,19 +822,20 @@ class _PackageRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${ArabicDates.visits(package.visitCount)} · ${fmtCurrency(package.price)}',
+                isCurrent
+                    ? '${ArabicDates.visits(dates.length)} من ${fmtInt(size)} · جارية'
+                    : '${ArabicDates.visits(size)} · ${fmtCurrency(AppStore.packageRate.price)}',
                 style: AppText.rowTitleSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 2),
-              Text(
-                ArabicDates.range(package.startDate, package.endDate),
-                style: AppText.metaSmall,
-              ),
+              Text(span, style: AppText.metaSmall),
             ],
           ),
         ),
         const SizedBox(width: 8),
-        package.isPaid
+        isPaid
             ? StatusPill.success(
                 'مدفوعة',
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

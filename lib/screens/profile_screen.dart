@@ -19,8 +19,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final activePackages =
-        store.packages.where((p) => p.isActive).length;
+    final owing = store.outstandingClients.length;
     final visitsThisMonth = store.visits.where((v) {
       final now = DateTime.now();
       return v.scheduledAt.year == now.year && v.scheduledAt.month == now.month;
@@ -44,8 +43,8 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: _Stat(
-                value: fmtInt(activePackages),
-                label: 'باقة جارية',
+                value: fmtInt(owing),
+                label: 'عليها مستحق',
               ),
             ),
             const SizedBox(width: 12),
@@ -92,9 +91,10 @@ class ProfileScreen extends StatelessWidget {
               Text('الباقات', style: AppText.sectionTitle),
               const SizedBox(height: 6),
               Text(
-                'الباقة الواحدة ${ArabicDates.visits(AppStore.defaultPackage.visitCount)}'
-                ' بـ ${fmtCurrency(AppStore.defaultPackage.price)}.'
-                ' تُباع من ملف العميلة، أو من زر «تجديد» في الملخص.',
+                'الباقة الواحدة ${ArabicDates.visits(AppStore.packageRate.visitCount)}'
+                ' بـ ${fmtCurrency(AppStore.packageRate.price)}.'
+                ' كل أربع زيارات تحضرها العميلة تُحتسب باقة، وتُسجَّل الدفعة'
+                ' من تبويب الدفعات أو من ملف العميلة.',
                 style: AppText.bodyLarge,
               ),
             ],

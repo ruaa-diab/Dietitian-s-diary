@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_store.dart';
 import '../data/store_scope.dart';
 import '../models/models.dart';
 import '../theme/app_colors.dart';
@@ -8,7 +9,7 @@ import '../utils/formatting.dart';
 import '../widgets/common.dart';
 import '../widgets/illustrations.dart';
 import '../widgets/line_icon.dart';
-import 'new_package_screen.dart';
+import 'record_payment_sheet.dart';
 import 'progress_card_screen.dart';
 
 /// Screen 06 — the package-complete celebration.
@@ -16,16 +17,16 @@ import 'progress_card_screen.dart';
 /// Pushed as a transparent route so the screen underneath stays visible
 /// behind the scrim, as in the mockup.
 class PackageCompleteScreen extends StatefulWidget {
-  const PackageCompleteScreen({super.key, required this.packageId});
+  const PackageCompleteScreen({super.key, required this.clientId});
 
-  final String packageId;
+  final String clientId;
 
-  static Route<void> route({required String packageId}) => PageRouteBuilder<void>(
+  static Route<void> route({required String clientId}) => PageRouteBuilder<void>(
         opaque: false,
         barrierColor: Colors.transparent,
         transitionDuration: const Duration(milliseconds: 220),
         reverseTransitionDuration: const Duration(milliseconds: 180),
-        pageBuilder: (_, __, ___) => PackageCompleteScreen(packageId: packageId),
+        pageBuilder: (_, __, ___) => PackageCompleteScreen(clientId: clientId),
         transitionsBuilder: (_, animation, __, child) =>
             FadeTransition(opacity: animation, child: child),
       );
@@ -68,12 +69,25 @@ class _PackageCompleteScreenState extends State<PackageCompleteScreen>
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final pkg = store.package(widget.packageId);
-    final client = store.client(pkg.clientId);
+    final client = store.clientOrNull(widget.clientId);
+    if (client == null) return const SizedBox.shrink();
 
-    final attended = store.attendedCount(pkg.id);
-    final days = ArabicDates.daysBetween(pkg.startDate, pkg.endDate ?? DateTime.now());
-    final fullAttendance = attended == pkg.visitCount;
+    final perPackage = AppStore.packageRate.visitCount;
+    final packagesDone = store.packagesUsed(client.id);
+    // How long this package took: from her first visit in it to her last.
+    final attendedDates = store
+        .visitsForClient(client.id)
+        .where((v) => v.status == VisitStatus.attended)
+        .map((v) => v.scheduledAt)
+        .toList()
+      ..sort();
+    final block = attendedDates.length >= perPackage
+        ? attendedDates.sublist(attendedDates.length - perPackage)
+        : attendedDates;
+    final days = block.length < 2
+        ? 0
+        : ArabicDates.daysBetween(block.first, block.last);
+    final missed = store.noShowCount(client.id);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -93,10 +107,11 @@ class _PackageCompleteScreenState extends State<PackageCompleteScreen>
                       child: _CelebrationCard(
                         float: _float,
                         client: client,
-                        package: pkg,
-                        attended: attended,
+                        perPackage: perPackage,
+                        packagesDone: packagesDone,
                         days: days,
-                        fullAttendance: fullAttendance,
+                        missed: missed,
+                        due: store.balanceDueFor(client.id),
                       ),
                     ),
                   ),
@@ -114,22 +129,27 @@ class _CelebrationCard extends StatelessWidget {
   const _CelebrationCard({
     required this.float,
     required this.client,
-    required this.package,
-    required this.attended,
+    required this.perPackage,
+    required this.packagesDone,
     required this.days,
-    required this.fullAttendance,
+    required this.missed,
+    required this.due,
   });
 
   final Animation<double> float;
   final Client client;
-  final ClientPackage package;
-  final int attended;
+  final int perPackage;
+
+  /// How many packages she has now finished in total — "باقتها الثانية".
+  final int packagesDone;
   final int days;
-  final bool fullAttendance;
+  final int missed;
+  final double due;
 
   @override
   Widget build(BuildContext context) {
     final firstName = client.name.split(' ').first;
+    final ordinal = packagesDone >= 2 ? ' (باقتها ${fmtInt(packagesDone)})' : '';
 
     return Container(
       padding: const EdgeInsets.fromLTRB(26, 34, 26, 26),
@@ -150,25 +170,28 @@ class _CelebrationCard extends StatelessWidget {
                 offset: Offset(0, -6 * Curves.easeInOut.transform(float.value)),
                 child: child,
               ),
-              child: CompletionRing(progress: attended / package.visitCount),
+              child: const CompletionRing(progress: 1),
             ),
           ),
           const SizedBox(height: 22),
           Text(
-            '${fmtInt(attended)} من ${fmtInt(package.visitCount)} — الباقة اكتملت',
+            '${fmtInt(perPackage)} من ${fmtInt(perPackage)} — الباقة اكتملت',
             textAlign: TextAlign.center,
             style: AppText.eyebrow,
           ),
           const SizedBox(height: 10),
           Text(
-            'أنهت $firstName باقتها',
+            'أنهت $firstName باقتها$ordinal',
             textAlign: TextAlign.center,
             style: AppText.cardHeadline,
           ),
           const SizedBox(height: 12),
           Text(
-            'أكملت ${ArabicDates.visits(package.visitCount)}.'
-            ' وقت مناسب لعرض الباقة التالية.',
+            due > 0
+                ? 'أكملت ${ArabicDates.visits(perPackage)}.'
+                    ' المستحق عليها الآن ${fmtCurrency(due)}.'
+                : 'أكملت ${ArabicDates.visits(perPackage)}.'
+                    ' وقت مناسب للاتفاق على الباقة التالية.',
             textAlign: TextAlign.center,
             style: AppText.bodyLarge,
           ),
@@ -179,19 +202,20 @@ class _CelebrationCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               StatusPill(
-                label: ArabicDates.visits(package.visitCount),
+                label: ArabicDates.visits(perPackage),
                 background: AppColors.sageBgAlt,
                 foreground: AppColors.sageText,
                 padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
               ),
-              StatusPill.due(
-                ArabicDates.days(days),
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
-              ),
+              if (days > 0)
+                StatusPill.due(
+                  ArabicDates.days(days),
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+                ),
               StatusPill(
-                label: fullAttendance
-                    ? 'حضور كامل'
-                    : 'حضور ${fmtInt(attended)} من ${fmtInt(package.visitCount)}',
+                label: missed == 0
+                    ? 'بلا غياب'
+                    : 'غابت ${ArabicDates.visits(missed)}',
                 background: AppColors.honeyBg,
                 foreground: AppColors.honeyText,
                 padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
@@ -200,13 +224,10 @@ class _CelebrationCard extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           PrimaryButton(
-            label: 'بيع الباقة التالية',
+            label: due > 0 ? 'تسجيل دفعة' : 'تسجيل دفعة الباقة التالية',
             onPressed: () {
-              Navigator.of(context)
-                ..pop()
-                ..push(MaterialPageRoute<void>(
-                  builder: (_) => NewPackageScreen(clientId: client.id),
-                ));
+              Navigator.of(context).pop();
+              RecordPaymentSheet.show(context, clientId: client.id);
             },
           ),
           const SizedBox(height: 10),

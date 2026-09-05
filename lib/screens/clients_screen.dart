@@ -199,17 +199,15 @@ class _ClientRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final active = store.activePackage(client.id);
-    final latest = store.latestPackage(client.id);
-    final remaining = store.remainingForClient(client.id);
+    final attended = store.attendedCount(client.id);
+    final remaining = store.remainingVisits(client.id);
+    final due = store.balanceDueFor(client.id);
 
-    final subtitle = switch ((active, latest)) {
-      (final ClientPackage pkg, _) =>
-        'باقة ${ArabicDates.visits(pkg.visitCount)} · بدأت ${ArabicDates.dayMonth(pkg.startDate)}',
-      (null, final ClientPackage pkg) =>
-        'انتهت الباقة · ${ArabicDates.dayMonth(pkg.endDate ?? pkg.startDate)}',
-      _ => 'لا توجد باقة بعد',
-    };
+    final subtitle = attended == 0
+        ? 'لم تبدأ بعد'
+        : due > 0
+            ? '${ArabicDates.visits(attended)} · ${fmtCurrency(due)} مستحقة'
+            : '${ArabicDates.visits(attended)} · الحساب مسدّد';
 
     return Material(
       color: AppColors.card,
@@ -237,7 +235,7 @@ class _ClientRow extends StatelessWidget {
                   name: client.name,
                   seed: client.id,
                   size: 48,
-                  muted: active == null,
+                  muted: attended == 0,
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -271,8 +269,12 @@ class _ClientRow extends StatelessWidget {
   }
 }
 
-/// Remaining-visit badge, coloured by urgency: none left is neutral, the
-/// last visit is flagged in clay, anything else is on-track green.
+/// Remaining-visit badge, coloured by urgency: the last visit of a
+/// package is flagged in clay, anything else is on-track green.
+///
+/// Zero left doesn't read as "٠ متبقية" — that looks like she has run
+/// out of something, when what has actually happened is that she has
+/// finished a package and the next visit starts the next one.
 class RemainingBadge extends StatelessWidget {
   const RemainingBadge({super.key, required this.remaining});
 
@@ -280,8 +282,8 @@ class RemainingBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (remaining == 0) return StatusPill.neutral('أكملت باقتها');
     final label = '${fmtInt(remaining)} متبقية';
-    if (remaining == 0) return StatusPill.neutral(label);
     if (remaining == 1) return StatusPill.due(label);
     return StatusPill.success(label);
   }

@@ -1,26 +1,27 @@
+import 'dart:math' as math;
+
 import '../models/models.dart';
 
-/// The four lists the store is built from.
 typedef SampleSeed = ({
   List<Client> clients,
-  List<ClientPackage> packages,
   List<Visit> visits,
+  List<Payment> payments,
 });
 
-/// Placeholder roster used until the app is wired to a real database.
+/// The roster the mockups describe, and what demo mode and the tests
+/// run on. A real signed-in account never sees any of it — it starts
+/// empty and fills with her own people.
 ///
-/// The six clients named in the mockups are seeded by hand so the Today,
-/// client-detail and dashboard screens open on the states the design
-/// shows; the rest of the book of business is generated so the revenue
-/// trend and the "الكل ٢٤" count are real numbers rather than captions.
-///
-/// Everything is anchored to *today*, so the app demos correctly whenever
-/// it is run rather than only on the day the mockups were drawn.
+/// Anchored to "today" rather than the day the mockups were drawn, so a
+/// test run always exercises a plausible current week. The six clients
+/// named in the design are placed by hand to land on the exact states
+/// the screens show; the rest of the twenty-four are generated so the
+/// dashboard's revenue trend and outstanding total are real sums rather
+/// than captions.
 abstract final class SampleData {
   static SampleSeed build({DateTime? today}) {
     final anchor = today ?? DateTime.now();
-    final builder = _SeedBuilder(DateTime(anchor.year, anchor.month, anchor.day));
-    return builder.build();
+    return _SeedBuilder(DateTime(anchor.year, anchor.month, anchor.day)).build();
   }
 }
 
@@ -30,8 +31,8 @@ class _SeedBuilder {
   final DateTime today;
 
   final clients = <Client>[];
-  final packages = <ClientPackage>[];
   final visits = <Visit>[];
+  final payments = <Payment>[];
 
   int _seq = 0;
   String _id(String prefix) => '$prefix${++_seq}';
@@ -40,341 +41,145 @@ class _SeedBuilder {
   DateTime _at(int daysAgo, [int hour = 10, int minute = 0]) =>
       DateTime(today.year, today.month, today.day - daysAgo, hour, minute);
 
-  DateTime _day(int daysAgo) => _at(daysAgo, 0, 0);
-
-  bool _isToday(DateTime d) =>
-      d.year == today.year && d.month == today.month && d.day == today.day;
-
   SampleSeed build() {
-    _featuredClients();
-    _bookOfBusiness();
-    return (clients: clients, packages: packages, visits: visits);
+    _featured();
+    _generated();
+    return (clients: clients, visits: visits, payments: payments);
   }
 
-  // ── The six clients drawn in the mockups ─────────────────────────────
-
-  void _featuredClients() {
-    _nour();
-    _heba();
-    _reem();
-    _salma();
-    _lama();
-    _amal();
-    _doaa();
-  }
-
-  /// نور خالد — on her third package, final visit today at ١٠:٣٠،
-  /// ١٠٠ ₪ still owed, four kilos down.
-  void _nour() {
-    final id = 'c-nour';
-    clients.add(Client(
+  Client _client(
+    String id,
+    String name,
+    String phone,
+    int age, {
+    int startedDaysAgo = 90,
+  }) {
+    final client = Client(
       id: id,
-      name: 'نور خالد',
-      phone: '0541234567',
-      age: 34,
-      startDate: _day(75),
-    ));
-
-    _closedPackage(clientId: id, visitCount: 4, price: 100, startDaysAgo: 75, endDaysAgo: 49);
-    _closedPackage(clientId: id, visitCount: 4, price: 100, startDaysAgo: 48, endDaysAgo: 21);
-
-    // The running package: three attended, the fourth is today's visit.
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 4,
-      price: 100,
-      startDate: _day(20),
-    ));
-    _visit(id, pkgId, 1, _at(20, 10, 30), VisitStatus.attended);
-    _visit(id, pkgId, 2, _at(13, 10, 30), VisitStatus.attended);
-    _visit(id, pkgId, 3, _at(6, 10, 30), VisitStatus.attended);
-    _visit(id, pkgId, 4, _at(0, 10, 30), VisitStatus.scheduled);
-
+      name: name,
+      phone: phone,
+      age: age,
+      startDate: _at(startedDaysAgo, 0, 0),
+    );
+    clients.add(client);
+    return client;
   }
 
-  /// هبة منصور — second visit of four today at ١٢:٠٠، paid up front.
-  void _heba() {
-    final id = 'c-heba';
-    clients.add(Client(
-      id: id,
-      name: 'هبة منصور',
-      phone: '0522987410',
-      age: 29,
-      startDate: _day(12),
-    ));
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 4,
-      price: 100,
-      startDate: _day(12),
-      payments: [_payment(pkgId, 100, PaymentMethod.cash, _day(12))],
-    ));
-    _visit(id, pkgId, 1, _at(12, 12, 0), VisitStatus.attended);
-    _visit(id, pkgId, 2, _at(0, 12, 0), VisitStatus.scheduled);
-    _visit(id, pkgId, 3, _at(-7, 12, 0), VisitStatus.scheduled);
-    _visit(id, pkgId, 4, _at(-14, 12, 0), VisitStatus.scheduled);
-
+  void _visit(String clientId, DateTime at, VisitStatus status) {
+    visits.add(Visit(id: _id('v'), clientId: clientId, scheduledAt: at, status: status));
   }
 
-  /// ريم عبد الله — came in at ٩:٠٠ this morning and was marked attended,
-  /// so she shows as a collapsed row on the Today screen.
-  void _reem() {
-    final id = 'c-reem';
-    clients.add(Client(
-      id: id,
-      name: 'ريم عبد الله',
-      phone: '0503311882',
-      age: 41,
-      startDate: _day(27),
-    ));
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 4,
-      price: 100,
-      startDate: _day(27),
-      payments: [_payment(pkgId, 100, PaymentMethod.transfer, _day(27))],
-    ));
-    _visit(id, pkgId, 1, _at(27, 9, 0), VisitStatus.attended);
-    _visit(id, pkgId, 2, _at(0, 9, 0), VisitStatus.attended);
-    _visit(id, pkgId, 3, _at(-7, 9, 0), VisitStatus.scheduled);
-    _visit(id, pkgId, 4, _at(-14, 9, 0), VisitStatus.scheduled);
-
-  }
-
-  /// سلمى يوسف — missed her last visit at ٨:٠٠، which closed her package,
-  /// so she heads the "تحتاج تجديد" list.
-  void _salma() {
-    final id = 'c-salma';
-    clients.add(Client(
-      id: id,
-      name: 'سلمى يوسف',
-      phone: '0547720513',
-      age: 36,
-      startDate: _day(30),
-    ));
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 4,
-      price: 100,
-      startDate: _day(30),
-      endDate: today,
-      payments: [_payment(pkgId, 100, PaymentMethod.bit, _day(30))],
-    ));
-    _visit(id, pkgId, 1, _at(30, 8, 0), VisitStatus.attended);
-    _visit(id, pkgId, 2, _at(23, 8, 0), VisitStatus.attended);
-    _visit(id, pkgId, 3, _at(16, 8, 0), VisitStatus.attended);
-    _visit(id, pkgId, 4, _at(0, 8, 0), VisitStatus.noShow);
-
-  }
-
-  /// لمى صبري — eight-visit package, part-paid, ١٠٠ ₪ outstanding.
-  void _lama() {
-    final id = 'c-lama';
-    clients.add(Client(
-      id: id,
-      name: 'لمى صبري',
-      phone: '0526640199',
-      age: 45,
-      startDate: _day(16),
-    ));
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 8,
-      price: 190,
-      startDate: _day(16),
-      payments: [_payment(pkgId, 90, PaymentMethod.cash, _day(16))],
-    ));
-    for (var i = 0; i < 8; i++) {
-      final daysAgo = 16 - i * 7;
-      _visit(id, pkgId, i + 1, _at(daysAgo, 11, 0),
-          daysAgo > 0 ? VisitStatus.attended : VisitStatus.scheduled);
+  /// [count] attended visits, one a week, ending [lastDaysAgo] days ago.
+  void _attendedRun(String clientId, int count, {required int lastDaysAgo}) {
+    for (var i = 0; i < count; i++) {
+      _visit(clientId, _at(lastDaysAgo + (count - 1 - i) * 7, 10, 0), VisitStatus.attended);
     }
-
   }
 
-  /// أمل حجازي — just signed up, nothing paid yet, first visit still ahead.
-  void _amal() {
-    final id = 'c-amal';
-    clients.add(Client(
-      id: id,
-      name: 'أمل حجازي',
-      phone: '0559084423',
-      age: 31,
-      startDate: _day(7),
+  void _pay(String clientId, double amount, int daysAgo, PaymentMethod method) {
+    payments.add(Payment(
+      id: _id('p'),
+      clientId: clientId,
+      amount: amount,
+      method: method,
+      date: _at(daysAgo, 12, 0),
     ));
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: id,
-      visitCount: 4,
-      price: 100,
-      startDate: _day(7),
-    ));
-    for (var i = 0; i < 4; i++) {
-      _visit(id, pkgId, i + 1, _at(-3 - i * 7, 13, 0), VisitStatus.scheduled);
-    }
-
   }
 
-  /// دعاء شاهين — finished ten days ago and has not renewed.
-  void _doaa() {
-    final id = 'c-doaa';
-    clients.add(Client(
-      id: id,
-      name: 'دعاء شاهين',
-      phone: '0538812704',
-      age: 38,
-      startDate: _day(45),
+  /// A payment [monthsAgo] months back, on a day that exists in every
+  /// month. Placed by month rather than by "days ago" so the dashboard's
+  /// six bars are guaranteed to have something in each of them however
+  /// long the months in between happen to be.
+  void _payInMonth(String clientId, double amount, int monthsAgo, PaymentMethod method) {
+    final month = DateTime(today.year, today.month - monthsAgo);
+    final day = monthsAgo == 0 ? (today.day > 1 ? 1 : today.day) : 15;
+    payments.add(Payment(
+      id: _id('p'),
+      clientId: clientId,
+      amount: amount,
+      method: method,
+      date: DateTime(month.year, month.month, day, 12),
     ));
-    _closedPackage(clientId: id, visitCount: 4, price: 100, startDaysAgo: 38, endDaysAgo: 10);
   }
 
-  // ── The rest of the book, so the totals are real ─────────────────────
+  /// The six named in the design, placed to land on the states the
+  /// screens are drawn around.
+  void _featured() {
+    // نور — three visits in, her fourth is today and still to be marked.
+    // Nothing paid yet, so she owes the package she is using.
+    final nour = _client('c-nour', 'نور خالد', '0541234567', 34);
+    _attendedRun(nour.id, 3, lastDaysAgo: 7);
+    _visit(nour.id, _at(0, 10, 30), VisitStatus.scheduled);
 
-  static const _otherNames = [
-    'مريم عساف', 'رانيا الخوري', 'دينا سرحان', 'هالة زيدان', 'ياسمين قاسم',
-    'نادين حمدان', 'رغد الشامي', 'جمانة نصار', 'بشرى العلي', 'صفاء درويش',
-    'ميساء الحاج', 'عبير طنوس', 'لينا مراد', 'سوسن بدران', 'وفاء الأحمد',
-    'إيمان زعبي', 'شذى الخطيب',
-  ];
+    // هبة — halfway through a package she has paid for; today pending.
+    final heba = _client('c-heba', 'هبة منصور', '0522345678', 29);
+    _attendedRun(heba.id, 2, lastDaysAgo: 7);
+    _pay(heba.id, 100, 21, PaymentMethod.bit);
+    _visit(heba.id, _at(0, 12, 0), VisitStatus.scheduled);
 
-  /// Packages sold per month over the trailing six months, oldest first.
-  /// Prices alternate between the ٤-visit and ٨-visit packages.
-  static const _salesPerMonth = [11, 13, 10, 15, 14, 16];
+    // ريم — came this morning, already marked.
+    final reem = _client('c-reem', 'ريم عبد الله', '0533456789', 41);
+    _attendedRun(reem.id, 1, lastDaysAgo: 7);
+    _pay(reem.id, 100, 14, PaymentMethod.cash);
+    _visit(reem.id, _at(0, 9, 0), VisitStatus.attended);
 
-  void _bookOfBusiness() {
-    final ids = <String>[];
-    for (var i = 0; i < _otherNames.length; i++) {
-      final id = 'c-other-$i';
-      ids.add(id);
-      clients.add(Client(
-        id: id,
-        name: _otherNames[i],
-        phone: '05${(20000000 + i * 731913) % 100000000}'.padRight(10, '0'),
-        age: 26 + (i * 3) % 24,
-        startDate: _day(200 - i * 4),
-      ));
-    }
+    // سلمى — didn't come this morning, and has just finished her four,
+    // so she needs the next package. The no-show costs her nothing.
+    final salma = _client('c-salma', 'سلمى يوسف', '0544567890', 26);
+    _attendedRun(salma.id, 4, lastDaysAgo: 10);
+    _pay(salma.id, 100, 40, PaymentMethod.transfer);
+    _visit(salma.id, _at(0, 8, 0), VisitStatus.noShow);
 
-    var cursor = 0;
-    for (var m = 0; m < _salesPerMonth.length; m++) {
-      final isCurrentMonth = m == _salesPerMonth.length - 1;
-      for (var j = 0; j < _salesPerMonth[m]; j++) {
-        final clientId = ids[cursor++ % ids.length];
-        final visitCount = j.isEven ? 4 : 8;
-        final price = j.isEven ? 100.0 : 190.0;
+    // لمى — a package and a bit behind: five visits used, one paid for.
+    final lama = _client('c-lama', 'لمى صبري', '0555678901', 37);
+    _attendedRun(lama.id, 5, lastDaysAgo: 5);
+    _pay(lama.id, 100, 60, PaymentMethod.cash);
 
-        if (isCurrentMonth) {
-          _activePackage(clientId, visitCount, price, j);
-        } else {
-          final start = _monthDay(5 - m, 2 + (j % 20));
-          final closed = _day(1).isBefore(start.add(const Duration(days: 21)))
-              ? _day(1)
-              : start.add(const Duration(days: 21));
-          _closedPackageOn(clientId, visitCount, price, start, closed);
-        }
+    // أمل — one visit in, nothing paid.
+    final amal = _client('c-amal', 'أمل حجازي', '0566789012', 31);
+    _attendedRun(amal.id, 1, lastDaysAgo: 3);
+
+    // دعاء — two full packages done and paid; due to start a third.
+    final doaa = _client('c-doaa', 'دعاء شاهين', '0577890123', 45, startedDaysAgo: 200);
+    _attendedRun(doaa.id, 8, lastDaysAgo: 12);
+    _pay(doaa.id, 100, 120, PaymentMethod.cash);
+    _pay(doaa.id, 100, 50, PaymentMethod.bit);
+  }
+
+  /// Seventeen more, fully settled, spread across the last six months so
+  /// the dashboard's trend and counts are sums of real rows.
+  void _generated() {
+    const names = [
+      'رنا عوض', 'ميساء طه', 'جمانة نصر', 'بيان فارس', 'ليان شحادة',
+      'تالا زيدان', 'شهد مرعي', 'راما قاسم', 'نغم بدران', 'يارا حلبي',
+      'دانا سرحان', 'سارة عليان', 'هنا الخطيب', 'رهف عساف', 'مي دراغمة',
+      'لين أبو زيد', 'جنى الشامي',
+    ];
+
+    final random = math.Random(7);
+    for (var i = 0; i < names.length; i++) {
+      final client = _client(
+        'c-other-$i',
+        names[i],
+        '05${(10000000 + i * 111111).toString().padLeft(8, '0')}',
+        22 + random.nextInt(28),
+        startedDaysAgo: 150,
+      );
+
+      // Two to eight visits, cycling — so the roster is a mix of
+      // part-way-through and just-finished rather than everyone sitting
+      // exactly on a package boundary, which made "تحتاج تجديد" read as
+      // if it meant everybody.
+      final attended = 2 + (i % 7);
+      _attendedRun(client.id, attended, lastDaysAgo: 14 + i * 3);
+
+      // Settled up: one payment per package her visits have used,
+      // spread across the six months the dashboard charts so every bar
+      // is a real sum.
+      final packages = (attended / 4).ceil();
+      for (var p = 0; p < packages; p++) {
+        _payInMonth(client.id, 100, (i + p * 3) % 6, PaymentMethod.values[i % 3]);
       }
     }
-  }
-
-  /// A running package started earlier this month, part-attended, with the
-  /// remaining visits still ahead — never on today, which belongs to the
-  /// six featured clients.
-  void _activePackage(String clientId, int visitCount, double price, int j) {
-    // Started within the last fortnight, so the closing visit always lands
-    // in the future and the package can never read as already complete.
-    final startDay = (today.day - j % 14).clamp(1, today.day);
-    final start = DateTime(today.year, today.month, startDay);
-
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: clientId,
-      visitCount: visitCount,
-      price: price,
-      startDate: start,
-      payments: [_payment(pkgId, price, _method(j), start)],
-    ));
-
-    for (var i = 0; i < visitCount; i++) {
-      var at = DateTime(start.year, start.month, start.day + i * 7, 9 + (i + j) % 8, 0);
-      if (_isToday(at)) at = at.add(const Duration(days: 1));
-      _visit(clientId, pkgId, i + 1, at,
-          at.isBefore(today) ? VisitStatus.attended : VisitStatus.scheduled);
-    }
-  }
-
-  void _closedPackage({
-    required String clientId,
-    required int visitCount,
-    required double price,
-    required int startDaysAgo,
-    required int endDaysAgo,
-  }) =>
-      _closedPackageOn(clientId, visitCount, price, _day(startDaysAgo), _day(endDaysAgo));
-
-  void _closedPackageOn(
-    String clientId,
-    int visitCount,
-    double price,
-    DateTime start,
-    DateTime end,
-  ) {
-    final pkgId = _id('pkg-');
-    packages.add(ClientPackage(
-      id: pkgId,
-      clientId: clientId,
-      visitCount: visitCount,
-      price: price,
-      startDate: start,
-      endDate: end,
-      payments: [_payment(pkgId, price, _method(visitCount + start.day), start)],
-    ));
-
-    final span = end.difference(start).inDays.clamp(visitCount, 1000);
-    for (var i = 0; i < visitCount; i++) {
-      final at = start.add(Duration(days: (span * i / visitCount).round(), hours: 10));
-      _visit(clientId, pkgId, i + 1, at, VisitStatus.attended);
-    }
-  }
-
-  /// Day [day] of the month [monthsAgo] months back, clamped to a day the
-  /// month actually has and never later than today.
-  DateTime _monthDay(int monthsAgo, int day) {
-    final month = DateTime(today.year, today.month - monthsAgo);
-    final lastDay = DateTime(month.year, month.month + 1, 0).day;
-    final candidate = DateTime(month.year, month.month, day.clamp(1, lastDay));
-    return candidate.isAfter(today) ? today : candidate;
-  }
-
-  PaymentMethod _method(int seed) => PaymentMethod.values[seed % PaymentMethod.values.length];
-
-  Payment _payment(String packageId, double amount, PaymentMethod method, DateTime date) =>
-      Payment(id: _id('pay-'), packageId: packageId, amount: amount, method: method, date: date);
-
-  void _visit(String clientId, String packageId, int index, DateTime at, VisitStatus status) {
-    visits.add(Visit(
-      id: _id('visit-'),
-      clientId: clientId,
-      packageId: packageId,
-      index: index,
-      scheduledAt: at,
-      status: status,
-    ));
   }
 }

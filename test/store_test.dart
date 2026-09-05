@@ -35,14 +35,17 @@ void main() {
 
     test('outstanding balances total ٣٠٠ ₪ across three clients', () {
       expect(store.totalOutstanding, 300);
-      expect(store.outstandingPackages.length, 3);
+      expect(store.outstandingClients.map((c) => c.name),
+          containsAll(<String>['نور خالد', 'لمى صبري', 'أمل حجازي']));
+      expect(store.outstandingClients.length, 3);
     });
 
-    test('renewals list only clients whose latest package has closed', () {
-      final names = store.needsRenewal.map((r) => r.client.name);
+    test('renewals list clients who have just used their fourth visit', () {
+      final names = store.needsRenewal.map((c) => c.name);
       expect(names, containsAll(<String>['سلمى يوسف', 'دعاء شاهين']));
-      for (final entry in store.needsRenewal) {
-        expect(entry.package.isActive, isFalse);
+      for (final client in store.needsRenewal) {
+        expect(store.remainingVisits(client.id), 0);
+        expect(store.attendedCount(client.id), greaterThan(0));
       }
     });
 
@@ -62,178 +65,323 @@ void main() {
     });
   });
 
-  group('visit outcomes', () {
-    Visit nourFinalVisit() => store.todayVisits.firstWhere(
-          (v) => store.client(v.clientId).name == 'نور خالد',
-        );
+  group('counting visits', () {
+    Visit nourVisitToday() => store.todayVisits.firstWhere((v) => v.clientId == 'c-nour');
 
-    test('attending the last visit closes the package and celebrates', () {
-      final visit = nourFinalVisit();
-      final packageId = visit.packageId;
-      expect(store.package(packageId).isActive, isTrue);
+    test('every four attended visits costs one package', () {
+      // نور has been three times and paid nothing.
+      expect(store.attendedCount('c-nour'), 3);
+      expect(store.packagesUsed('c-nour'), 1);
+      expect(store.amountChargedFor('c-nour'), 100);
+      expect(store.balanceDueFor('c-nour'), 100);
+      expect(store.visitInPackage('c-nour'), 3);
+      expect(store.remainingVisits('c-nour'), 1);
+    });
+
+    test('the fifth visit starts a second package, and a second ١٠٠ ₪', () {
+      // لمى has been five times and paid for one package.
+      expect(store.attendedCount('c-lama'), 5);
+      expect(store.packagesUsed('c-lama'), 2);
+      expect(store.amountChargedFor('c-lama'), 200);
+      expect(store.amountPaidFor('c-lama'), 100);
+      expect(store.balanceDueFor('c-lama'), 100);
+      expect(store.packagesOwedBy('c-lama'), 1);
+      // And she is one visit into the new package, not finished with it.
+      expect(store.visitInPackage('c-lama'), 1);
+      expect(store.remainingVisits('c-lama'), 3);
+    });
+
+    test('attending the fourth finishes the package and asks for the next', () {
+      final visit = nourVisitToday();
+      expect(store.clientNeedsRenewal('c-nour'), isFalse);
 
       store.markVisit(visit.id, VisitStatus.attended);
 
-      expect(store.package(packageId).isActive, isFalse);
-      expect(store.pendingCelebration?.id, packageId);
-      expect(store.remainingVisits(packageId), 0);
-      expect(store.clientNeedsRenewal(visit.clientId), isTrue);
+      expect(store.attendedCount('c-nour'), 4);
+      expect(store.remainingVisits('c-nour'), 0);
+      expect(store.clientNeedsRenewal('c-nour'), isTrue);
+      expect(store.pendingCelebrationClientId, 'c-nour');
+      // Still one package used — the fifth visit is what starts the next.
+      expect(store.packagesUsed('c-nour'), 1);
+      expect(store.balanceDueFor('c-nour'), 100);
     });
 
     test('a no-show costs the package nothing', () {
-      final visit = nourFinalVisit();
+      final visit = nourVisitToday();
       store.markVisit(visit.id, VisitStatus.noShow);
 
-      // Recorded, and visible in her file — but she paid for four visits
-      // and has only had three, so the package is still running and the
-      // fourth is still hers.
-      expect(store.package(visit.packageId).isActive, isTrue);
-      expect(store.attendedCount(visit.packageId), 3);
-      expect(store.noShowCount(visit.packageId), 1);
-      expect(store.remainingVisits(visit.packageId), 1);
-      expect(store.pendingCelebration, isNull);
-      expect(store.clientNeedsRenewal(visit.clientId), isFalse);
+      expect(store.attendedCount('c-nour'), 3);
+      expect(store.noShowCount('c-nour'), 1);
+      expect(store.remainingVisits('c-nour'), 1);
+      expect(store.balanceDueFor('c-nour'), 100);
+      expect(store.pendingCelebrationClientId, isNull);
+      expect(store.clientNeedsRenewal('c-nour'), isFalse);
     });
 
     test('a no-show does not advance the visit number', () {
-      final visit = nourFinalVisit();
+      final visit = nourVisitToday();
       expect(store.visitNumber(visit), 4);
 
       store.markVisit(visit.id, VisitStatus.noShow);
       expect(store.visitNumber(store.visit(visit.id)), isNull);
 
       // The next appointment is still the fourth of four.
-      store.scheduleVisit(
-        clientId: visit.clientId,
+      final next = store.scheduleVisit(
+        clientId: 'c-nour',
         at: DateTime.now().add(const Duration(days: 7)),
       );
-      final next = store.visitsForPackage(visit.packageId).last;
       expect(store.visitNumber(next), 4);
     });
 
-    test('correcting an attendance to a no-show reopens the package', () {
-      final visit = nourFinalVisit();
+    test('correcting an attendance back gives the visit to the package', () {
+      final visit = nourVisitToday();
       store.markVisit(visit.id, VisitStatus.attended);
-      expect(store.package(visit.packageId).isActive, isFalse);
+      expect(store.remainingVisits('c-nour'), 0);
 
-      // "قلت إنها حضرت وتبيّن أنها لم تحضر" — the visit goes back to the
-      // package, so the package is running again and she still owes it
-      // one visit.
       store.markVisit(visit.id, VisitStatus.noShow, celebrate: false);
 
-      expect(store.package(visit.packageId).isActive, isTrue);
-      expect(store.remainingVisits(visit.packageId), 1);
-      expect(store.pendingCelebration, isNull);
+      expect(store.attendedCount('c-nour'), 3);
+      expect(store.remainingVisits('c-nour'), 1);
+      expect(store.clientNeedsRenewal('c-nour'), isFalse);
+      expect(store.pendingCelebrationClientId, isNull);
     });
 
     test('a correction never raises the celebration', () {
-      final visit = nourFinalVisit();
+      final visit = nourVisitToday();
       store.markVisit(visit.id, VisitStatus.attended, celebrate: false);
 
-      expect(store.package(visit.packageId).isActive, isFalse);
-      expect(store.pendingCelebration, isNull);
+      expect(store.remainingVisits('c-nour'), 0);
+      expect(store.pendingCelebrationClientId, isNull);
     });
 
-    test('undo reopens the package', () {
-      final visit = nourFinalVisit();
+    test('undo puts the visit back to unrecorded', () {
+      final visit = nourVisitToday();
       store.markVisit(visit.id, VisitStatus.attended);
       store.undoVisit(visit.id);
 
-      expect(store.package(visit.packageId).isActive, isTrue);
-      expect(store.pendingCelebration, isNull);
-      expect(store.remainingVisits(visit.packageId), 1);
+      expect(store.visit(visit.id).status, VisitStatus.scheduled);
+      expect(store.attendedCount('c-nour'), 3);
+      expect(store.pendingCelebrationClientId, isNull);
+    });
+  });
+
+  group('a client who was already coming', () {
+    test('prior visits and payments count from the first day', () {
+      final client = store.addClient(
+        name: 'سناء قدري',
+        phone: '0521119876',
+        priorVisits: 3,
+        priorPaid: 100,
+      );
+
+      expect(store.attendedCount(client.id), 3);
+      expect(store.visitInPackage(client.id), 3);
+      expect(store.remainingVisits(client.id), 1);
+      expect(store.balanceDueFor(client.id), 0);
+
+      // Her first visit here is the fourth of the package she is on.
+      final visit = store.scheduleVisit(clientId: client.id, at: DateTime.now());
+      expect(store.visitNumber(visit), 4);
+
+      store.markVisit(visit.id, VisitStatus.attended);
+      expect(store.attendedCount(client.id), 4);
+      expect(store.clientNeedsRenewal(client.id), isTrue);
+      expect(store.balanceDueFor(client.id), 0);
+    });
+
+    test('a history behind on payment shows as owing from the start', () {
+      final client = store.addClient(
+        name: 'ندى سالم',
+        phone: '0529998888',
+        priorVisits: 6,
+      );
+
+      expect(store.packagesUsed(client.id), 2);
+      expect(store.balanceDueFor(client.id), 200);
+      expect(store.packagesOwedBy(client.id), 2);
+    });
+
+    test('the history is editable afterwards', () {
+      final client = store.addClient(name: 'ريما', phone: '0521112222', priorVisits: 2);
+      expect(store.attendedCount(client.id), 2);
+
+      store.updateClient(client.id, priorVisits: 3);
+
+      expect(store.attendedCount(client.id), 3);
+      expect(store.client(client.id).name, 'ريما');
+    });
+
+    test('negative history is refused rather than stored', () {
+      final client = store.addClient(
+        name: 'هند',
+        phone: '0523334444',
+        priorVisits: -4,
+        priorPaid: -50,
+      );
+      expect(store.attendedCount(client.id), 0);
+      expect(store.amountPaidFor(client.id), 0);
     });
   });
 
   group('money', () {
-    ClientPackage nourPackage() =>
-        store.packagesFor('c-nour').firstWhere((p) => !p.isPaid);
-
     test('a payment reduces the balance and lands in this month revenue', () {
       final before = store.revenueForMonth(DateTime.now());
-      final pkg = nourPackage();
-      expect(pkg.balanceDue, 100);
+      expect(store.balanceDueFor('c-nour'), 100);
 
-      store.recordPayment(packageId: pkg.id, amount: 60, method: PaymentMethod.bit);
+      store.recordPayment(clientId: 'c-nour', amount: 60, method: PaymentMethod.bit);
 
-      expect(store.package(pkg.id).balanceDue, 40);
+      expect(store.balanceDueFor('c-nour'), 40);
       expect(store.totalOutstanding, 240);
       expect(store.revenueForMonth(DateTime.now()), before + 60);
     });
 
-    test('a payment recorded by mistake can be taken back', () {
-      final pkg = nourPackage();
-      final before = store.revenueForMonth(DateTime.now());
-      store.recordPayment(packageId: pkg.id, amount: 60, method: PaymentMethod.bit);
-      final payment = store.lastPaymentFor('c-nour')!;
+    test('paying more than owed leaves nothing owed, not a negative', () {
+      store.recordPayment(clientId: 'c-nour', amount: 500, method: PaymentMethod.cash);
 
-      store.deletePayment(packageId: pkg.id, paymentId: payment.id);
-
-      expect(store.package(pkg.id).balanceDue, 100);
-      expect(store.package(pkg.id).payments.map((p) => p.id), isNot(contains(payment.id)));
-      expect(store.revenueForMonth(DateTime.now()), before);
-      expect(store.totalOutstanding, 300);
+      expect(store.balanceDueFor('c-nour'), 0);
+      expect(store.amountPaidFor('c-nour'), 500);
     });
 
-    test('overpaying is capped at the outstanding balance', () {
-      final pkg = nourPackage();
-      store.recordPayment(packageId: pkg.id, amount: 500, method: PaymentMethod.cash);
+    test('two packages behind can be settled in one payment', () {
+      final client = store.addClient(name: 'وفاء', phone: '0525556666', priorVisits: 8);
+      expect(store.packagesOwedBy(client.id), 2);
 
-      expect(store.package(pkg.id).balanceDue, 0);
-      expect(store.package(pkg.id).paid, 100);
-      expect(store.package(pkg.id).isPaid, isTrue);
+      store.recordPayment(clientId: client.id, amount: 200, method: PaymentMethod.cash);
+
+      expect(store.balanceDueFor(client.id), 0);
+      expect(store.packagesOwedBy(client.id), 0);
+    });
+
+    test('a payment recorded by mistake can be taken back', () {
+      final before = store.revenueForMonth(DateTime.now());
+      final payment =
+          store.recordPayment(clientId: 'c-nour', amount: 60, method: PaymentMethod.bit);
+
+      store.deletePayment(payment.id);
+
+      expect(store.balanceDueFor('c-nour'), 100);
+      expect(store.revenueForMonth(DateTime.now()), before);
+      expect(store.paymentsFor('c-nour').map((p) => p.id), isNot(contains(payment.id)));
+    });
+
+    test('a payment entered wrong can be corrected', () {
+      final payment =
+          store.recordPayment(clientId: 'c-nour', amount: 1000, method: PaymentMethod.cash);
+
+      store.updatePayment(payment.id, amount: 100, method: PaymentMethod.transfer);
+
+      expect(store.balanceDueFor('c-nour'), 0);
+      expect(store.amountPaidFor('c-nour'), 100);
+      expect(store.paymentsFor('c-nour').first.method, PaymentMethod.transfer);
+    });
+
+    test('the package rate is ٤ زيارات for ١٠٠ ₪', () {
+      expect(AppStore.packageRate.visitCount, 4);
+      expect(AppStore.packageRate.price, 100);
     });
   });
 
-  group('selling a package', () {
-    test('paid in full creates visits and settles the balance', () {
-      final option = AppStore.packageOptions.first;
-      final pkg = store.sellPackage(
-        clientId: 'c-doaa',
-        option: option,
-        intent: PaymentIntent.paidInFull,
-        amountReceived: 0,
-        method: PaymentMethod.cash,
-      );
+  group('the schedule', () {
+    test('booking needs nothing bought first', () {
+      // سلمى has finished her package and owes nothing — under the old
+      // model there was no running package to book against, which was
+      // exactly backwards: she books, then the client pays.
+      final at = DateTime.now().add(const Duration(days: 2));
+      final booked = store.scheduleVisit(clientId: 'c-salma', at: at);
 
-      expect(pkg.isPaid, isTrue);
-      expect(pkg.balanceDue, 0);
-      expect(store.visitsForPackage(pkg.id).length, option.visitCount);
-      expect(store.remainingVisits(pkg.id), option.visitCount);
-      expect(store.clientNeedsRenewal('c-doaa'), isFalse);
+      expect(store.visitsOn(at).map((v) => v.id), contains(booked.id));
+      expect(store.visitsForClient('c-salma').map((v) => v.id), contains(booked.id));
     });
 
-    test('there is one package to sell: ٤ زيارات for ١٠٠ ₪', () {
-      expect(AppStore.packageOptions, hasLength(1));
-      expect(AppStore.defaultPackage.visitCount, 4);
-      expect(AppStore.defaultPackage.price, 100);
-    });
-
-    test('paying later leaves the whole price outstanding', () {
-      final pkg = store.sellPackage(
-        clientId: 'c-doaa',
-        option: AppStore.defaultPackage,
-        intent: PaymentIntent.later,
-        amountReceived: 150,
-        method: PaymentMethod.cash,
+    test('a brand-new client can be booked immediately', () {
+      final client = store.addClient(name: 'روان', phone: '0527778888');
+      final visit = store.scheduleVisit(
+        clientId: client.id,
+        at: DateTime.now().add(const Duration(days: 1)),
       );
 
-      expect(pkg.payments, isEmpty);
-      expect(pkg.balanceDue, 100);
+      expect(store.visitsForClient(client.id), hasLength(1));
+      expect(store.visitNumber(visit), 1);
+      expect(store.balanceDueFor(client.id), 0);
     });
 
-    test('a partial payment records only what was received', () {
-      final pkg = store.sellPackage(
-        clientId: 'c-doaa',
-        option: AppStore.defaultPackage,
-        intent: PaymentIntent.partial,
-        amountReceived: 60,
-        method: PaymentMethod.transfer,
+    test('a visit that already happened can be recorded straight in', () {
+      // "She came last Tuesday and I never wrote it down."
+      final client = store.addClient(name: 'غادة', phone: '0524445555');
+      store.scheduleVisit(
+        clientId: client.id,
+        at: DateTime.now().subtract(const Duration(days: 6)),
+        status: VisitStatus.attended,
       );
 
-      expect(pkg.paid, 60);
-      expect(pkg.balanceDue, 40);
-      expect(store.lastPaymentFor('c-doaa')?.amount, 60);
+      expect(store.attendedCount(client.id), 1);
+      expect(store.balanceDueFor(client.id), 100);
+    });
+
+    test('rescheduling moves the day and the time', () {
+      final at = DateTime.now().add(const Duration(days: 3));
+      final booked = store.scheduleVisit(clientId: 'c-nour', at: at);
+      final moved = DateTime(at.year, at.month, at.day + 4, 14, 45);
+
+      store.updateVisit(booked.id, at: moved);
+
+      expect(store.visit(booked.id).scheduledAt, moved);
+      expect(store.visitsOn(moved).map((v) => v.id), contains(booked.id));
+    });
+
+    test('an appointment can be handed to a different client', () {
+      final at = DateTime.now().add(const Duration(days: 3));
+      final booked = store.scheduleVisit(clientId: 'c-nour', at: at);
+
+      store.updateVisit(booked.id, clientId: 'c-heba');
+
+      expect(store.visit(booked.id).clientId, 'c-heba');
+      expect(store.visitsForClient('c-nour').map((v) => v.id), isNot(contains(booked.id)));
+      expect(store.visitsForClient('c-heba').map((v) => v.id), contains(booked.id));
+    });
+
+    test('a recorded attendance can still be edited', () {
+      final visit = store.todayVisits.firstWhere((v) => v.clientId == 'c-reem');
+      expect(visit.status, VisitStatus.attended);
+
+      final moved = DateTime.now().subtract(const Duration(days: 2));
+      store.updateVisit(visit.id, at: moved, status: VisitStatus.noShow);
+
+      expect(store.visit(visit.id).status, VisitStatus.noShow);
+      expect(store.visit(visit.id).scheduledAt, moved);
+    });
+
+    test('deleting an attended appointment takes the visit back', () {
+      final before = store.attendedCount('c-reem');
+      final visit = store.todayVisits.firstWhere((v) => v.clientId == 'c-reem');
+
+      store.deleteVisit(visit.id);
+
+      expect(store.visits.map((v) => v.id), isNot(contains(visit.id)));
+      expect(store.attendedCount('c-reem'), before - 1);
+    });
+
+    test('upcoming appointments skip resolved and past ones', () {
+      final upcoming = store.upcomingVisits;
+      final today = DateTime.now();
+
+      expect(upcoming.every((v) => !v.isResolved), isTrue);
+      for (final visit in upcoming) {
+        expect(
+          visit.scheduledAt.isBefore(DateTime(today.year, today.month, today.day)),
+          isFalse,
+        );
+      }
+      for (var i = 1; i < upcoming.length; i++) {
+        expect(upcoming[i].scheduledAt.isBefore(upcoming[i - 1].scheduledAt), isFalse);
+      }
+    });
+
+    test('scheduled days feed the calendar dots', () {
+      final at = DateTime.now().add(const Duration(days: 40));
+      store.scheduleVisit(clientId: 'c-nour', at: at);
+
+      expect(store.scheduledDaysIn(at), contains(at.day));
     });
   });
 
@@ -250,141 +398,31 @@ void main() {
       expect(after.startDate, before.startDate);
     });
 
-    test('deleting takes her packages, payments and visits with her', () {
-      expect(store.packagesFor('c-nour'), isNotEmpty);
+    test('deleting takes her appointments and payments with her', () {
       expect(store.visitsForClient('c-nour'), isNotEmpty);
       final revenueBefore = store.revenueForMonth(DateTime.now());
-      final herPayments = store
-          .paymentsFor('c-nour')
-          .where((p) => p.date.year == DateTime.now().year && p.date.month == DateTime.now().month)
-          .fold(0.0, (sum, p) => sum + p.amount);
+      final hersThisMonth = store.paymentsFor('c-nour').where((p) {
+        final now = DateTime.now();
+        return p.date.year == now.year && p.date.month == now.month;
+      }).fold(0.0, (total, p) => total + p.amount);
 
       store.deleteClient('c-nour');
 
       expect(store.clientOrNull('c-nour'), isNull);
-      expect(store.packagesFor('c-nour'), isEmpty);
       expect(store.visitsForClient('c-nour'), isEmpty);
+      expect(store.paymentsFor('c-nour'), isEmpty);
       expect(store.searchClients('نور', ClientFilter.all), isEmpty);
-      // Her money leaves the totals with her, rather than lingering as a
-      // balance owed by nobody.
+      // Her money leaves the totals with her.
       expect(store.totalOutstanding, 200);
-      expect(store.revenueForMonth(DateTime.now()), revenueBefore - herPayments);
-    });
-
-    test('her visits leave today\'s schedule too', () {
-      expect(
-        store.todayVisits.any((v) => v.clientId == 'c-nour'),
-        isTrue,
-      );
-
-      store.deleteClient('c-nour');
-
+      expect(store.revenueForMonth(DateTime.now()), revenueBefore - hersThisMonth);
       expect(store.todayVisits.any((v) => v.clientId == 'c-nour'), isFalse);
     });
 
-    test('the visit record runs newest first and covers every package', () {
+    test('the visit record runs newest first', () {
       final visits = store.visitsForClient('c-nour');
       expect(visits, isNotEmpty);
       for (var i = 1; i < visits.length; i++) {
-        expect(
-          visits[i].scheduledAt.isAfter(visits[i - 1].scheduledAt),
-          isFalse,
-          reason: 'visit record is not in newest-first order',
-        );
-      }
-      expect(
-        visits.map((v) => v.packageId).toSet().length,
-        store.packagesFor('c-nour').length,
-      );
-    });
-  });
-
-  group('the schedule', () {
-    test('booking needs a running package to hang the visit on', () {
-      expect(store.canSchedule('c-nour'), isTrue);
-      // سلمى's package has closed, so there is nothing to book against.
-      expect(store.canSchedule('c-salma'), isFalse);
-      expect(
-        store.scheduleVisit(
-          clientId: 'c-salma',
-          at: DateTime.now().add(const Duration(days: 1)),
-        ),
-        isNull,
-      );
-      expect(store.schedulableClients.map((c) => c.id), isNot(contains('c-salma')));
-    });
-
-    test('a booked appointment lands on its day and in its package', () {
-      final at = DateTime.now().add(const Duration(days: 3));
-      final booked = store.scheduleVisit(clientId: 'c-nour', at: at)!;
-
-      expect(store.visitsOn(at).map((v) => v.id), contains(booked.id));
-      expect(booked.packageId, store.activePackage('c-nour')!.id);
-      expect(store.scheduledDaysIn(at), contains(at.day));
-    });
-
-    test('rescheduling moves the day and the time', () {
-      final at = DateTime.now().add(const Duration(days: 3));
-      final booked = store.scheduleVisit(clientId: 'c-nour', at: at)!;
-      final moved = DateTime(at.year, at.month, at.day + 4, 14, 45);
-
-      expect(store.rescheduleVisit(booked.id, at: moved), isTrue);
-
-      expect(store.visit(booked.id).scheduledAt, moved);
-      expect(store.visitsOn(at), isNot(contains(booked)));
-      expect(store.visitsOn(moved).map((v) => v.id), contains(booked.id));
-    });
-
-    test('reassigning moves the appointment into the new client package', () {
-      final at = DateTime.now().add(const Duration(days: 3));
-      final booked = store.scheduleVisit(clientId: 'c-nour', at: at)!;
-      final target = store.activePackage('c-heba')!;
-
-      expect(store.rescheduleVisit(booked.id, clientId: 'c-heba'), isTrue);
-
-      final moved = store.visit(booked.id);
-      expect(moved.clientId, 'c-heba');
-      expect(moved.packageId, target.id);
-      expect(store.visitsForClient('c-nour').map((v) => v.id), isNot(contains(booked.id)));
-      expect(store.visitsForClient('c-heba').map((v) => v.id), contains(booked.id));
-    });
-
-    test('reassigning to a client with no package changes nothing', () {
-      final at = DateTime.now().add(const Duration(days: 3));
-      final booked = store.scheduleVisit(clientId: 'c-nour', at: at)!;
-
-      expect(store.rescheduleVisit(booked.id, clientId: 'c-salma'), isFalse);
-      expect(store.visit(booked.id).clientId, 'c-nour');
-    });
-
-    test('deleting an attended appointment gives the visit back', () {
-      final visit = store.todayVisits.firstWhere(
-        (v) => store.client(v.clientId).name == 'نور خالد',
-      );
-      store.markVisit(visit.id, VisitStatus.attended);
-      expect(store.package(visit.packageId).isActive, isFalse);
-
-      store.deleteVisit(visit.id);
-
-      expect(store.visits.map((v) => v.id), isNot(contains(visit.id)));
-      expect(store.package(visit.packageId).isActive, isTrue);
-      expect(store.remainingVisits(visit.packageId), 1);
-    });
-
-    test('upcoming appointments skip resolved and past ones', () {
-      final upcoming = store.upcomingVisits;
-      final today = DateTime.now();
-
-      expect(upcoming.every((v) => !v.isResolved), isTrue);
-      for (final visit in upcoming) {
-        expect(
-          visit.scheduledAt.isBefore(DateTime(today.year, today.month, today.day)),
-          isFalse,
-        );
-      }
-      // Soonest first.
-      for (var i = 1; i < upcoming.length; i++) {
-        expect(upcoming[i].scheduledAt.isBefore(upcoming[i - 1].scheduledAt), isFalse);
+        expect(visits[i].scheduledAt.isAfter(visits[i - 1].scheduledAt), isFalse);
       }
     });
   });
@@ -399,7 +437,6 @@ void main() {
       store.updateDietitianName('  د. سارة العلي  ');
 
       expect(store.dietitianName, 'د. سارة العلي');
-      // The honorific is skipped, not greeted.
       expect(store.dietitianFirstName, 'سارة');
       expect(store.dietitianByline, 'د. سارة العلي · أخصائية تغذية');
     });
@@ -435,7 +472,7 @@ void main() {
       expect(a.revenueForMonth(day), b.revenueForMonth(day));
     });
 
-    test('a package never reads as complete on the day it is seeded active', () {
+    test('the featured states hold on any seeded day', () {
       for (final day in [
         DateTime(2026, 9, 1),
         DateTime(2026, 9, 15),
@@ -443,13 +480,9 @@ void main() {
         DateTime(2026, 12, 31),
       ]) {
         final seeded = AppStore(seed: SampleData.build(today: day));
-        for (final pkg in seeded.packages.where((p) => p.isActive)) {
-          expect(
-            seeded.attendedCount(pkg.id) < pkg.visitCount,
-            isTrue,
-            reason: 'active package ${pkg.id} was fully resolved on $day',
-          );
-        }
+        expect(seeded.totalOutstanding, 300, reason: 'outstanding drifted on $day');
+        expect(seeded.attendedCount('c-nour'), 3, reason: 'نور drifted on $day');
+        expect(seeded.clientNeedsRenewal('c-salma'), isTrue, reason: 'سلمى drifted on $day');
       }
     });
   });
@@ -479,6 +512,8 @@ void main() {
       expect(ArabicDates.visits(2), 'زيارتان');
       expect(ArabicDates.visits(4), '٤ زيارات');
       expect(ArabicDates.visits(12), '١٢ زيارة');
+      expect(ArabicDates.packages(1), 'باقة واحدة');
+      expect(ArabicDates.packages(2), 'باقتين');
       expect(ArabicDates.days(21), '٢١ يوماً');
       expect(ArabicDates.dayMonth(DateTime(2026, 9, 1)), '١ سبتمبر');
       expect(ArabicDates.monthYear(DateTime(2026, 9, 1)), 'سبتمبر ٢٠٢٦');

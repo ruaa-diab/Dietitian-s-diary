@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/practice_profile.dart';
+import '../data/app_store.dart';
 import '../data/store_scope.dart';
+import '../models/models.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../utils/formatting.dart';
@@ -42,9 +44,9 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     final client = store.clientOrNull(widget.clientId);
-    final history = client == null ? const [] : store.packagesFor(client.id);
+    final attended = client == null ? 0 : store.attendedCount(client.id);
 
-    if (client == null || history.isEmpty) {
+    if (client == null || attended == 0) {
       return Scaffold(
         backgroundColor: AppColors.surface,
         body: SafeArea(
@@ -53,7 +55,7 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
               _TopBar(onShare: null, busy: false),
               Expanded(
                 child: Center(
-                  child: Text('لا توجد باقة لعرض تقدّمها بعد.', style: AppText.bodyLarge),
+                  child: Text('لا زيارات لعرض تقدّمها بعد.', style: AppText.bodyLarge),
                 ),
               ),
             ],
@@ -62,11 +64,13 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
       );
     }
 
-    final package = history.first;
-    final days = ArabicDates.daysBetween(
-      package.startDate,
-      package.endDate ?? DateTime.now(),
-    );
+    // Since her first recorded visit — the span the card is bragging about.
+    final firstVisit = store
+        .visitsForClient(client.id)
+        .where((v) => v.status == VisitStatus.attended)
+        .lastOrNull
+        ?.scheduledAt;
+    final days = ArabicDates.daysBetween(firstVisit ?? client.startDate, DateTime.now());
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -83,10 +87,10 @@ class _ProgressCardScreenState extends State<ProgressCardScreen> {
                       key: _boundaryKey,
                       child: ProgressCard(
                         client: client,
-                        package: package,
-                        packageNumber: history.length,
+                        packageNumber: store.packagesUsed(client.id),
+                        packageSize: AppStore.packageRate.visitCount,
                         days: days,
-                        attendedVisits: store.attendedCount(package.id),
+                        attendedVisits: attended,
                         byline: store.dietitianByline,
                       ),
                     ),

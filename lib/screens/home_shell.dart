@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'clients_screen.dart';
-import 'new_package_screen.dart';
+import 'payment_screen.dart';
 import 'profile_screen.dart';
 import 'schedule_screen.dart';
 import 'summary_screen.dart';
@@ -11,10 +11,9 @@ import 'today_screen.dart';
 
 /// Holds the tabbed screens and the bottom navigation.
 ///
-/// باقة جديدة is a tab of its own, and also opens pushed with a client
-/// already chosen — from a client's file, a "تجديد" button in the
-/// summary, or the celebration. As a tab it starts with no client and
-/// asks for one first.
+/// الدفعات is a tab of its own — the list of who owes what — and also
+/// opens pushed for one client, from her file or from the celebration
+/// when she finishes her four visits.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, this.initialTab = AppTab.today});
 
@@ -44,9 +43,7 @@ class _HomeShellState extends State<HomeShell> {
             const TodayScreen(),
             const ScheduleScreen(),
             const ClientsScreen(),
-            // Saving from the tab has nowhere to pop to, so it hands the
-            // shell back to today's list instead.
-            NewPackageScreen(onSaved: () => setState(() => _tab = AppTab.today)),
+            const PaymentScreen(),
             const SummaryScreen(),
             const ProfileScreen(),
           ],

@@ -92,12 +92,14 @@ class WelcomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     _NavOption(
-                      icon: AppIcons.plus,
+                      icon: AppIcons.card,
                       color: AppColors.sageDark,
                       background: AppColors.sageBg,
-                      title: 'باقة جديدة',
-                      subtitle: 'بيع باقة زيارات لعميلة',
-                      onTap: () => _open(context, AppTab.newPackage),
+                      title: 'الدفعات',
+                      subtitle: store.totalOutstanding > 0
+                          ? '${fmtCurrency(store.totalOutstanding)} مستحقة'
+                          : 'كل الحسابات مسدّدة',
+                      onTap: () => _open(context, AppTab.payments),
                     ),
                     const SizedBox(height: 12),
                     _NavOption(

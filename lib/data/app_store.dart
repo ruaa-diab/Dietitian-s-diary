@@ -14,47 +14,52 @@ import 'sample_data.dart';
 /// to Firestore so it survives closing the app and stays the same across
 /// every device signed in to the same account.
 ///
-/// Everything the UI shows is derived from these three lists; screens
-/// only ever talk to this class, never to [CloudStore] or [SampleData]
-/// directly, so persistence and sync live entirely in this file.
+/// Everything the UI shows is derived from three lists: clients, their
+/// appointments, and the money they have paid. Screens only ever talk to
+/// this class, never to [CloudStore] or [SampleData] directly.
+///
+/// ## How visits and money relate
+///
+/// They don't, directly — and that is the point. An appointment is booked
+/// against a client, not against a package she may not have bought yet;
+/// the real order of events is *book, come, then pay*. Money is a running
+/// balance: every four visits she attends costs one package, and whatever
+/// she has handed over is set against that. So being one package behind,
+/// or two, or half of one, is just a number — there is no package record
+/// left in an awkward state waiting to be reconciled.
 class AppStore extends ChangeNotifier {
   /// In-memory only — no cloud, nothing persists or syncs. Used by tests
-  /// and by anything that wants a disposable, deterministic store.
+  /// and by demo mode.
   AppStore({SampleSeed? seed})
       : _cloud = null,
         _auth = null {
     final data = seed ?? SampleData.build();
     _clients = [...data.clients];
-    _packages = [...data.packages];
     _visits = [...data.visits];
+    _payments = [...data.payments];
   }
 
   /// Backed by Firestore, scoped to one signed-in account. Starts empty
   /// — a real account gets her real data, not the sample roster — and
   /// fills in as soon as the first snapshot arrives from whichever
   /// device(s) she's already used. [auth] is only kept so [signOut] has
-  /// something to call — this store never checks who's signed in itself.
+  /// something to call.
   AppStore.forUser(FirebaseFirestore firestore, String uid, {FirebaseAuth? auth})
       : _cloud = CloudStore(firestore, uid),
         _auth = auth {
     _clients = [];
-    _packages = [];
     _visits = [];
+    _payments = [];
     _subscribeToCloud();
   }
 
-  /// The package shapes offered on the "باقة جديدة" screen.
+  /// The one package sold: ٤ زيارات for ١٠٠ ₪.
   ///
-  /// There is exactly one: ٤ زيارات for ١٠٠ ₪. Kept as a list rather than
-  /// a bare constant because the screen still renders it as a choice of
-  /// one, and a second shape would only be another entry here — nothing
-  /// downstream assumes the count.
-  static const packageOptions = <PackageOption>[
-    PackageOption(visitCount: 4, price: 100),
-  ];
-
-  /// The package sold unless something says otherwise.
-  static PackageOption get defaultPackage => packageOptions.first;
+  /// A rate, not a record — see [packagesUsed]. Changing it changes what
+  /// future arithmetic charges; it does not rewrite what is already owed,
+  /// because what is already owed is recomputed from this too. Worth
+  /// knowing before anyone edits the number.
+  static const packageRate = PackageRate(visitCount: 4, price: 100);
 
   /// Null in tests and other in-memory-only instances; writes and the
   /// live subscriptions are skipped wherever this is null.
@@ -68,8 +73,8 @@ class AppStore extends ChangeNotifier {
   void signOut() => _auth?.signOut();
 
   StreamSubscription<List<Client>>? _clientsSub;
-  StreamSubscription<List<ClientPackage>>? _packagesSub;
   StreamSubscription<List<Visit>>? _visitsSub;
+  StreamSubscription<List<Payment>>? _paymentsSub;
   StreamSubscription<String?>? _profileSub;
 
   /// Listens for changes from Firestore — including ones made on another
@@ -83,12 +88,12 @@ class AppStore extends ChangeNotifier {
       _clients = clients;
       notifyListeners();
     }, onError: _logError);
-    _packagesSub = cloud.watchPackages().listen((packages) {
-      _packages = packages;
-      notifyListeners();
-    }, onError: _logError);
     _visitsSub = cloud.watchVisits().listen((visits) {
       _visits = visits;
+      notifyListeners();
+    }, onError: _logError);
+    _paymentsSub = cloud.watchPayments().listen((payments) {
+      _payments = payments;
       notifyListeners();
     }, onError: _logError);
     // Null until she has actually renamed herself, which is the common
@@ -104,8 +109,8 @@ class AppStore extends ChangeNotifier {
   }
 
   late List<Client> _clients;
-  late List<ClientPackage> _packages;
   late List<Visit> _visits;
+  late List<Payment> _payments;
 
   int _idCounter = 0;
 
@@ -143,8 +148,8 @@ class AppStore extends ChangeNotifier {
   @override
   void dispose() {
     _clientsSub?.cancel();
-    _packagesSub?.cancel();
     _visitsSub?.cancel();
+    _paymentsSub?.cancel();
     _profileSub?.cancel();
     super.dispose();
   }
@@ -198,17 +203,17 @@ class AppStore extends ChangeNotifier {
     await user.updatePassword(newPassword);
   }
 
-  /// Set when marking a visit completes a package, so the Today screen can
-  /// raise the celebration sheet. The UI clears it once shown.
-  ClientPackage? pendingCelebration;
+  // ── Reading ──────────────────────────────────────────────────────────
+
+  /// Set when marking a visit finishes a client's four, so the Today
+  /// screen can raise the celebration. The UI clears it once shown.
+  String? pendingCelebrationClientId;
 
   List<Client> get clients => List.unmodifiable(_clients);
-  List<ClientPackage> get packages => List.unmodifiable(_packages);
   List<Visit> get visits => List.unmodifiable(_visits);
+  List<Payment> get payments => List.unmodifiable(_payments);
 
   DateTime get now => DateTime.now();
-
-  // ── Lookups ──────────────────────────────────────────────────────────
 
   Client client(String id) => _clients.firstWhere((c) => c.id == id);
 
@@ -219,164 +224,168 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  ClientPackage package(String id) => _packages.firstWhere((p) => p.id == id);
-
   Visit visit(String id) => _visits.firstWhere((v) => v.id == id);
 
-  /// Packages for a client, newest first.
-  List<ClientPackage> packagesFor(String clientId) =>
-      _packages.where((p) => p.clientId == clientId).toList()
-        ..sort((a, b) => b.startDate.compareTo(a.startDate));
-
-  /// The running package, if any — a package with no end date.
-  ClientPackage? activePackage(String clientId) {
-    for (final p in packagesFor(clientId)) {
-      if (p.isActive) return p;
+  Visit? visitOrNull(String id) {
+    for (final v in _visits) {
+      if (v.id == id) return v;
     }
     return null;
   }
 
-  ClientPackage? latestPackage(String clientId) {
-    final all = packagesFor(clientId);
-    return all.isEmpty ? null : all.first;
-  }
-
-  /// Visits of a package in schedule order.
-  List<Visit> visitsForPackage(String packageId) =>
-      _visits.where((v) => v.packageId == packageId).toList()
-        ..sort((a, b) => a.index.compareTo(b.index));
-
-  /// Every visit a client has ever had, most recent first — the record
-  /// her file shows, day by day, across all her packages.
+  /// Every appointment a client has, most recent first — the record her
+  /// file shows, day by day.
   List<Visit> visitsForClient(String clientId) =>
       _visits.where((v) => v.clientId == clientId).toList()
-        ..sort((a, b) => _byScheduleThenIndex(b, a));
+        ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt));
+
+  /// Her attended visits, oldest first — the order they count in.
+  List<Visit> _attendedFor(String clientId) =>
+      _visits.where((v) => v.clientId == clientId && v.status == VisitStatus.attended).toList()
+        ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
 
   /// Every payment a client has made, most recent first.
-  List<Payment> paymentsFor(String clientId) => [
-        for (final pkg in _packages.where((p) => p.clientId == clientId)) ...pkg.payments,
-      ]..sort((a, b) => b.date.compareTo(a.date));
+  List<Payment> paymentsFor(String clientId) =>
+      _payments.where((p) => p.clientId == clientId).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
 
-  /// Her most recent payment, or null if she has never paid anything.
+  /// Her most recent payment, or null if nothing has been recorded here.
+  /// Money carried in as [Client.priorPaid] has no date and so is not a
+  /// candidate — "آخر دفعة" means one this app watched happen.
   Payment? lastPaymentFor(String clientId) => paymentsFor(clientId).firstOrNull;
 
-  /// Removes a payment recorded by mistake — a wrong amount, or one
-  /// entered against the wrong client. The balance goes straight back up
-  /// by what the payment was worth, and the month's revenue back down.
-  void deletePayment({required String packageId, required String paymentId}) {
-    final index = _packages.indexWhere((p) => p.id == packageId);
-    if (index < 0) return;
-    final pkg = _packages[index];
-    final remaining = pkg.payments.where((p) => p.id != paymentId).toList();
-    if (remaining.length == pkg.payments.length) return;
+  // ── Counting visits ──────────────────────────────────────────────────
 
-    _packages[index] = pkg.copyWith(payments: remaining);
-    _persist((cloud) => cloud.updatePackage(_packages[index]));
-    notifyListeners();
+  /// Visits she has actually attended, including any carried in with her.
+  /// The only number the money is derived from: a لم تحضر is recorded and
+  /// stays visible, but it costs her nothing.
+  int attendedCount(String clientId) {
+    final client = clientOrNull(clientId);
+    return (client?.priorVisits ?? 0) + _attendedFor(clientId).length;
   }
 
-  int attendedCount(String packageId) => _visits
-      .where((v) => v.packageId == packageId && v.status == VisitStatus.attended)
-      .length;
+  int noShowCount(String clientId) =>
+      _visits.where((v) => v.clientId == clientId && v.status == VisitStatus.noShow).length;
 
-  int resolvedCount(String packageId) =>
-      _visits.where((v) => v.packageId == packageId && v.isResolved).length;
+  int get _perPackage => packageRate.visitCount;
 
-  int noShowCount(String packageId) => _visits
-      .where((v) => v.packageId == packageId && v.status == VisitStatus.noShow)
-      .length;
+  /// How many packages her attendance has consumed — the first visit
+  /// starts a package, the fifth starts the second one.
+  int packagesUsed(String clientId) => (attendedCount(clientId) / _perPackage).ceil();
 
-  /// Visits still to be used up — what the "N متبقية" badge counts.
+  /// Which visit of the current package her most recent one was: 1–4, or
+  /// 0 before she has attended anything.
+  int visitInPackage(String clientId) {
+    final attended = attendedCount(clientId);
+    return attended == 0 ? 0 : ((attended - 1) % _perPackage) + 1;
+  }
+
+  /// Visits left in the package she is part-way through. Zero means she
+  /// has just used the fourth — the next visit starts a new package, and
+  /// a new ١٠٠ ₪.
+  int remainingVisits(String clientId) {
+    final attended = attendedCount(clientId);
+    return attended == 0 ? _perPackage : _perPackage - visitInPackage(clientId);
+  }
+
+  /// Kept for the screens that read it as "how many left".
+  int remainingForClient(String clientId) => remainingVisits(clientId);
+
+  /// She has finished a package and not started the next: the moment to
+  /// ask for the next ١٠٠ ₪.
+  bool clientNeedsRenewal(String clientId) =>
+      attendedCount(clientId) > 0 && remainingVisits(clientId) == 0;
+
+  /// Which visit of its package this one is — "الزيارة ٣ من ٤".
   ///
-  /// Only a visit she actually attended spends one. A لم تحضر is recorded
-  /// and stays visible in her file, but it costs the client nothing: she
-  /// paid for four visits and still has four coming.
-  int remainingVisits(String packageId) {
-    final pkg = package(packageId);
-    return (pkg.visitCount - attendedCount(packageId)).clamp(0, pkg.visitCount);
-  }
-
-  /// Remaining visits across a client's running package; 0 when idle.
-  int remainingForClient(String clientId) {
-    final active = activePackage(clientId);
-    return active == null ? 0 : remainingVisits(active.id);
-  }
-
-  /// A package is done when its visits have all been *attended* — see
-  /// [remainingVisits] for why a no-show doesn't count toward it.
-  bool isPackageComplete(String packageId) =>
-      attendedCount(packageId) >= package(packageId).visitCount;
-
-  /// Which of the package's visits this one is — "الزيارة ٣ من ٤".
-  ///
-  /// Counted by attendance, not by the slot the visit was booked into: a
-  /// missed appointment leaves the count where it was, so the next one
-  /// she attends is still the third of four. Returns null for a no-show,
-  /// which occupies no number at all.
+  /// Counted by attendance in date order, so a missed appointment leaves
+  /// the count where it was and the next one she attends keeps the number
+  /// the missed one would have had. Null for a no-show, which occupies no
+  /// number at all.
   int? visitNumber(Visit visit) {
     switch (visit.status) {
       case VisitStatus.noShow:
         return null;
       case VisitStatus.attended:
-        final attended = _visits
-            .where((v) => v.packageId == visit.packageId && v.status == VisitStatus.attended)
-            .toList()
-          ..sort(_byScheduleThenIndex);
-        return attended.indexWhere((v) => v.id == visit.id) + 1;
+        final attended = _attendedFor(visit.clientId);
+        final position = attended.indexWhere((v) => v.id == visit.id);
+        if (position < 0) return null;
+        final prior = clientOrNull(visit.clientId)?.priorVisits ?? 0;
+        return ((prior + position) % _perPackage) + 1;
       case VisitStatus.scheduled:
         // The number it would take if she attends it.
-        return attendedCount(visit.packageId) + 1;
+        return (attendedCount(visit.clientId) % _perPackage) + 1;
     }
   }
 
-  static int _byScheduleThenIndex(Visit a, Visit b) {
-    final byDate = a.scheduledAt.compareTo(b.scheduledAt);
-    return byDate != 0 ? byDate : a.index.compareTo(b.index);
-  }
-
-  // ── Today ────────────────────────────────────────────────────────────
+  // ── The schedule ─────────────────────────────────────────────────────
 
   List<Visit> visitsOn(DateTime day) {
-    final result =
-        _visits.where((v) => ArabicDates.isSameDay(v.scheduledAt, day)).toList();
+    final result = _visits.where((v) => ArabicDates.isSameDay(v.scheduledAt, day)).toList();
     result.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
     return result;
   }
 
-  /// Today's visits with the pending ones first, matching the mockup where
-  /// resolved visits collapse to the bottom of the list.
+  /// Today's visits with the pending ones first, so whoever is still to
+  /// be marked is at the top.
   List<Visit> get todayVisits {
     final all = visitsOn(now);
-    final pending = all.where((v) => !v.isResolved).toList();
-    final resolved = all.where((v) => v.isResolved).toList();
-    return [...pending, ...resolved];
+    return [
+      ...all.where((v) => !v.isResolved),
+      ...all.where((v) => v.isResolved),
+    ];
+  }
+
+  /// Days in [month] that have at least one appointment — the dots on
+  /// the calendar grid.
+  Set<int> scheduledDaysIn(DateTime month) => {
+        for (final visit in _visits)
+          if (visit.scheduledAt.year == month.year && visit.scheduledAt.month == month.month)
+            visit.scheduledAt.day,
+      };
+
+  /// Appointments still to happen, soonest first.
+  List<Visit> get upcomingVisits {
+    final today = DateTime(now.year, now.month, now.day);
+    return _visits.where((v) => !v.isResolved && !v.scheduledAt.isBefore(today)).toList()
+      ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
   }
 
   // ── Money ────────────────────────────────────────────────────────────
 
-  /// Packages still carrying a balance, most recent first.
-  List<ClientPackage> get outstandingPackages =>
-      _packages.where((p) => !p.isPaid).toList()
-        ..sort((a, b) => b.startDate.compareTo(a.startDate));
+  /// What her visits have cost so far: one package per four attended.
+  double amountChargedFor(String clientId) => packagesUsed(clientId) * packageRate.price;
+
+  /// Everything she has handed over, including anything carried in.
+  double amountPaidFor(String clientId) {
+    final client = clientOrNull(clientId);
+    return (client?.priorPaid ?? 0) +
+        _payments.where((p) => p.clientId == clientId).fold(0.0, (total, p) => total + p.amount);
+  }
+
+  /// What she owes. Paying ahead shows as nothing owed rather than a
+  /// negative — a credit is real, but "−٥٠ ₪ مستحق" reads as a bug.
+  double balanceDueFor(String clientId) {
+    final due = amountChargedFor(clientId) - amountPaidFor(clientId);
+    return due <= 0 ? 0 : due;
+  }
+
+  /// How many packages behind she is — 0, 1, or occasionally 2.
+  int packagesOwedBy(String clientId) =>
+      (balanceDueFor(clientId) / packageRate.price).ceil();
+
+  /// Clients carrying a balance, largest first.
+  List<Client> get outstandingClients => _clients.where((c) => balanceDueFor(c.id) > 0).toList()
+    ..sort((a, b) => balanceDueFor(b.id).compareTo(balanceDueFor(a.id)));
 
   double get totalOutstanding =>
-      outstandingPackages.fold(0.0, (total, p) => total + p.balanceDue);
+      _clients.fold(0.0, (total, c) => total + balanceDueFor(c.id));
 
-  double balanceDueFor(String clientId) => _packages
-      .where((p) => p.clientId == clientId)
-      .fold(0.0, (total, p) => total + p.balanceDue);
-
-  double revenueForMonth(DateTime month) {
-    var total = 0.0;
-    for (final pkg in _packages) {
-      for (final payment in pkg.payments) {
-        if (payment.date.year == month.year && payment.date.month == month.month) {
-          total += payment.amount;
-        }
-      }
-    }
-    return total;
-  }
+  /// Only dated payments count toward a month's revenue; money carried in
+  /// with a client predates the records and belongs to no month here.
+  double revenueForMonth(DateTime month) => _payments
+      .where((p) => p.date.year == month.year && p.date.month == month.month)
+      .fold(0.0, (total, p) => total + p.amount);
 
   /// The six months ending with the current one, oldest first — the mini
   /// bar chart on the dashboard.
@@ -399,30 +408,20 @@ class AppStore extends ChangeNotifier {
 
   // ── Renewals ─────────────────────────────────────────────────────────
 
-  /// Clients whose latest package has finished and has not been renewed.
-  List<({Client client, ClientPackage package})> get needsRenewal {
-    final result = <({Client client, ClientPackage package})>[];
-    for (final c in _clients) {
-      final latest = latestPackage(c.id);
-      if (latest == null || latest.isActive) continue;
-      result.add((client: c, package: latest));
-    }
-    result.sort((a, b) => (b.package.endDate ?? b.package.startDate)
-        .compareTo(a.package.endDate ?? a.package.startDate));
+  /// Clients who have just used their fourth visit, most recently first.
+  List<Client> get needsRenewal {
+    final result = _clients.where((c) => clientNeedsRenewal(c.id)).toList();
+    result.sort((a, b) {
+      final aLast = _attendedFor(a.id).lastOrNull?.scheduledAt ?? a.startDate;
+      final bLast = _attendedFor(b.id).lastOrNull?.scheduledAt ?? b.startDate;
+      return bLast.compareTo(aLast);
+    });
     return result;
   }
 
-  bool clientNeedsRenewal(String clientId) {
-    final latest = latestPackage(clientId);
-    return latest != null && !latest.isActive;
-  }
-
-  /// The client the "باقة جديدة" screen should preselect: whoever most
-  /// recently finished a package.
-  Client? get renewalCandidate {
-    final pending = needsRenewal;
-    return pending.isEmpty ? null : pending.first.client;
-  }
+  /// Whoever the payment screen should offer first: the client owing the
+  /// most.
+  Client? get paymentCandidate => outstandingClients.firstOrNull;
 
   // ── Search & filters ─────────────────────────────────────────────────
 
@@ -449,163 +448,29 @@ class AppStore extends ChangeNotifier {
   // regardless of whether this store is cloud-backed, so the UI never
   // waits on a network round-trip to feel like it responded. In cloud
   // mode the matching write is also queued; the live listener above will
-  // confirm it (or, rarely, correct it) once Firestore's own local cache
-  // reflects the change — visually a no-op, since it's the same data.
+  // confirm it once Firestore's own local cache reflects the change.
 
-  /// Records a visit outcome. Attending the last visit of a package
-  /// closes the package and queues the celebration.
-  ///
-  /// [celebrate] is off when the change is a *correction* — fixing a
-  /// wrongly-marked attendance from the client file, where a party popper
-  /// over a bookkeeping fix would be beside the point.
-  void markVisit(String visitId, VisitStatus status, {bool celebrate = true}) =>
-      _setVisitStatus(visitId, status, celebrate: celebrate);
-
-  /// Undoes a حضرت / لم تحضر decision, putting the visit back to
-  /// "not recorded yet" and reopening the package if that decision was
-  /// the one that closed it.
-  void undoVisit(String visitId) =>
-      _setVisitStatus(visitId, VisitStatus.scheduled, celebrate: false);
-
-  /// The one place a visit's outcome changes — marking it, undoing it, or
-  /// correcting it later all land here, so the package it belongs to is
-  /// opened and closed by the same rule every time. Changing an attended
-  /// visit back to a no-show, say, reopens a package that this visit had
-  /// closed; nothing needs to remember that it was the one that closed it.
-  void _setVisitStatus(String visitId, VisitStatus status, {required bool celebrate}) {
-    final index = _visits.indexWhere((v) => v.id == visitId);
-    if (index < 0) return;
-    final visit = _visits[index];
-    if (visit.status == status) return;
-    _visits[index] = visit.copyWith(status: status);
-
-    final changedPackage = _reconcilePackage(visit.packageId, celebrate: celebrate);
-    _persist((cloud) => cloud.updateVisitAndPackage(_visits[index], changedPackage));
-    notifyListeners();
-  }
-
-  /// Brings a package's open/closed state back in line with how many of
-  /// its visits have actually been attended, and returns it if that
-  /// changed anything. Every path that can move the attended count —
-  /// marking, correcting, deleting or reassigning a visit — goes through
-  /// here, so none of them has to reason about it separately.
-  ClientPackage? _reconcilePackage(String packageId, {bool celebrate = false}) {
-    final pkgIndex = _packages.indexWhere((p) => p.id == packageId);
-    if (pkgIndex < 0) return null;
-    final pkg = _packages[pkgIndex];
-    final complete = isPackageComplete(pkg.id);
-
-    ClientPackage? changed;
-    if (complete && pkg.isActive) {
-      _packages[pkgIndex] = pkg.copyWith(endDate: now);
-      changed = _packages[pkgIndex];
-      if (celebrate) pendingCelebration = changed;
-    } else if (!complete && !pkg.isActive) {
-      _packages[pkgIndex] = pkg.copyWith(clearEndDate: true);
-      changed = _packages[pkgIndex];
-    }
-    if (!complete && pendingCelebration?.id == pkg.id) pendingCelebration = null;
-    return changed;
-  }
-
-  void consumeCelebration() {
-    pendingCelebration = null;
-  }
-
-  void recordPayment({
-    required String packageId,
-    required double amount,
-    required PaymentMethod method,
-    DateTime? date,
-  }) {
-    if (amount <= 0) return;
-    final index = _packages.indexWhere((p) => p.id == packageId);
-    if (index < 0) return;
-    final pkg = _packages[index];
-    final capped = amount.clamp(0.0, pkg.balanceDue);
-    final payment = Payment(
-      id: _nextId('pay'),
-      packageId: packageId,
-      amount: capped.toDouble(),
-      method: method,
-      date: date ?? now,
-    );
-    _packages[index] = pkg.copyWith(payments: [...pkg.payments, payment]);
-    _persist((cloud) => cloud.updatePackage(_packages[index]));
-    notifyListeners();
-  }
-
-  /// Sells a package: creates the package, its scheduled visits (weekly
-  /// from today) and any up-front payment.
-  ClientPackage sellPackage({
-    required String clientId,
-    required PackageOption option,
-    required PaymentIntent intent,
-    required double amountReceived,
-    required PaymentMethod method,
-  }) {
-    final start = now;
-    final packageId = _nextId('pkg');
-
-    final payments = <Payment>[];
-    final received = switch (intent) {
-      PaymentIntent.paidInFull => option.price,
-      PaymentIntent.partial => amountReceived.clamp(0.0, option.price).toDouble(),
-      PaymentIntent.later => 0.0,
-    };
-    if (received > 0) {
-      payments.add(Payment(
-        id: _nextId('pay'),
-        packageId: packageId,
-        amount: received,
-        method: method,
-        date: start,
-      ));
-    }
-
-    final pkg = ClientPackage(
-      id: packageId,
-      clientId: clientId,
-      visitCount: option.visitCount,
-      price: option.price,
-      startDate: start,
-      payments: payments,
-    );
-    _packages.add(pkg);
-    _persist((cloud) => cloud.insertPackage(pkg));
-
-    final newVisits = <Visit>[];
-    for (var i = 0; i < option.visitCount; i++) {
-      final at = DateTime(start.year, start.month, start.day + i * 7, 10, 0);
-      newVisits.add(Visit(
-        id: _nextId('visit'),
-        clientId: clientId,
-        packageId: packageId,
-        index: i + 1,
-        scheduledAt: at,
-      ));
-    }
-    _visits.addAll(newVisits);
-    _persist((cloud) => cloud.insertVisits(newVisits));
-
-    notifyListeners();
-    return pkg;
-  }
-
+  /// Adds a client, optionally one who is already part-way through:
+  /// [priorVisits] she has attended and [priorPaid] she has handed over
+  /// before any of it was being recorded here.
   Client addClient({
     required String name,
     required String phone,
-    required int age,
+    int age = 0,
+    int priorVisits = 0,
+    double priorPaid = 0,
   }) {
     final client = Client(
       id: _nextId('client'),
-      name: name,
-      phone: phone,
+      name: name.trim(),
+      phone: phone.trim(),
       age: age,
       startDate: now,
+      priorVisits: priorVisits < 0 ? 0 : priorVisits,
+      priorPaid: priorPaid < 0 ? 0 : priorPaid,
     );
     _clients.add(client);
-    _persist((cloud) => cloud.insertClient(client));
+    _persist((cloud) => cloud.upsertClient(client));
     notifyListeners();
     return client;
   }
@@ -617,6 +482,8 @@ class AppStore extends ChangeNotifier {
     String? name,
     String? phone,
     int? age,
+    int? priorVisits,
+    double? priorPaid,
   }) {
     final index = _clients.indexWhere((c) => c.id == id);
     if (index < 0) return;
@@ -624,145 +491,172 @@ class AppStore extends ChangeNotifier {
       name: name?.trim(),
       phone: phone?.trim(),
       age: age,
+      priorVisits: priorVisits == null ? null : (priorVisits < 0 ? 0 : priorVisits),
+      priorPaid: priorPaid == null ? null : (priorPaid < 0 ? 0 : priorPaid),
     );
-    _persist((cloud) => cloud.updateClient(_clients[index]));
+    _persist((cloud) => cloud.upsertClient(_clients[index]));
     notifyListeners();
   }
 
-  /// Removes a client and everything hanging off her — her packages,
-  /// their payments (which live inside the package documents) and every
-  /// visit. Leaving those behind would keep her money in the dashboard's
-  /// totals and her appointments on the schedule long after she is gone.
+  /// Removes a client and everything of hers — her appointments and her
+  /// payments. Leaving those behind would keep her money in the
+  /// dashboard's totals and her appointments on the schedule.
   void deleteClient(String id) {
-    final packageIds = _packages.where((p) => p.clientId == id).map((p) => p.id).toList();
     final visitIds = _visits.where((v) => v.clientId == id).map((v) => v.id).toList();
+    final paymentIds = _payments.where((p) => p.clientId == id).map((p) => p.id).toList();
 
     _clients.removeWhere((c) => c.id == id);
-    _packages.removeWhere((p) => p.clientId == id);
     _visits.removeWhere((v) => v.clientId == id);
-    if (packageIds.contains(pendingCelebration?.id)) pendingCelebration = null;
+    _payments.removeWhere((p) => p.clientId == id);
+    if (pendingCelebrationClientId == id) pendingCelebrationClientId = null;
 
     _persist((cloud) => cloud.deleteClient(
           clientId: id,
-          packageIds: packageIds,
           visitIds: visitIds,
+          paymentIds: paymentIds,
         ));
     notifyListeners();
   }
 
-  // ── The schedule ─────────────────────────────────────────────────────
-  //
-  // An appointment is a [Visit] against a package the client has already
-  // bought, so scheduling one always needs a running package to hang it
-  // on — that is what [canSchedule] answers before the sheet lets her
-  // pick someone.
-
-  /// Whether an appointment can be booked for this client at all: she
-  /// needs a package that is still running.
-  bool canSchedule(String clientId) => activePackage(clientId) != null;
-
-  /// Clients an appointment can be booked for, by name.
-  List<Client> get schedulableClients =>
-      _clients.where((c) => canSchedule(c.id)).toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
-
-  /// Books an appointment against the client's running package. Returns
-  /// null — booking nothing — when she has no package to book against.
-  Visit? scheduleVisit({required String clientId, required DateTime at}) {
-    final active = activePackage(clientId);
-    if (active == null) return null;
+  /// Books an appointment — or records one that already happened, by
+  /// passing a [status] and a date in the past. Nothing has to be bought
+  /// first: an appointment belongs to the client, not to a package.
+  Visit scheduleVisit({
+    required String clientId,
+    required DateTime at,
+    VisitStatus status = VisitStatus.scheduled,
+  }) {
     final visit = Visit(
       id: _nextId('visit'),
       clientId: clientId,
-      packageId: active.id,
-      index: _nextIndexIn(active.id),
       scheduledAt: at,
+      status: status,
     );
     _visits.add(visit);
-    _persist((cloud) => cloud.insertVisit(visit));
+    _persist((cloud) => cloud.upsertVisit(visit));
     notifyListeners();
     return visit;
   }
 
-  /// Moves an appointment: a new time, a new day, a different client, or
-  /// any combination. Returns false when it asked for a client with no
-  /// running package to move it to, in which case nothing changes.
-  bool rescheduleVisit(String visitId, {DateTime? at, String? clientId}) {
+  /// Moves or re-files an appointment: a new time, a new day, a different
+  /// client, a corrected outcome, or any combination.
+  void updateVisit(
+    String visitId, {
+    DateTime? at,
+    String? clientId,
+    VisitStatus? status,
+  }) {
     final index = _visits.indexWhere((v) => v.id == visitId);
-    if (index < 0) return false;
-    final visit = _visits[index];
-
-    final movingToNewClient = clientId != null && clientId != visit.clientId;
-    ClientPackage? target;
-    if (movingToNewClient) {
-      target = activePackage(clientId);
-      if (target == null) return false;
-    }
-
-    _visits[index] = visit.copyWith(
+    if (index < 0) return;
+    _visits[index] = _visits[index].copyWith(
       scheduledAt: at,
-      clientId: movingToNewClient ? clientId : null,
-      packageId: movingToNewClient ? target!.id : null,
-      index: movingToNewClient ? _nextIndexIn(target!.id) : null,
+      clientId: clientId,
+      status: status,
     );
-    _persist((cloud) => cloud.updateVisit(_visits[index]));
-
-    // Both packages can change state when an attended visit moves
-    // between them: the one it left may reopen, the one it joined may
-    // close. Neither is a moment to celebrate — she is fixing a booking.
-    final changedTargets = <ClientPackage?>[
-      _reconcilePackage(visit.packageId),
-      if (movingToNewClient) _reconcilePackage(target!.id),
-    ];
-    for (final pkg in changedTargets.nonNulls) {
-      _persist((cloud) => cloud.updatePackage(pkg));
-    }
-
+    _persist((cloud) => cloud.upsertVisit(_visits[index]));
     notifyListeners();
-    return true;
   }
 
-  /// Cancels an appointment outright — she booked it by mistake, or it
-  /// will never happen. Deleting one she had marked حضرت gives that
-  /// visit back to the package, reopening it if it had been closed.
+  /// Cancels an appointment outright — booked by mistake, or it will
+  /// never happen. If it was marked حضرت, that visit stops counting and
+  /// her balance falls by the same arithmetic that raised it.
   void deleteVisit(String visitId) {
     final index = _visits.indexWhere((v) => v.id == visitId);
     if (index < 0) return;
     final visit = _visits.removeAt(index);
+    if (pendingCelebrationClientId == visit.clientId &&
+        !clientNeedsRenewal(visit.clientId)) {
+      pendingCelebrationClientId = null;
+    }
     _persist((cloud) => cloud.deleteVisit(visitId));
-
-    final changed = _reconcilePackage(visit.packageId);
-    if (changed != null) _persist((cloud) => cloud.updatePackage(changed));
     notifyListeners();
   }
 
-  /// The next free slot number in a package — appointments booked beyond
-  /// the ones sold with it keep counting up rather than colliding.
-  int _nextIndexIn(String packageId) {
-    final existing = visitsForPackage(packageId);
-    return existing.isEmpty ? 1 : existing.last.index + 1;
+  /// Records an outcome. Attending the fourth visit of a package queues
+  /// the celebration.
+  ///
+  /// [celebrate] is off when the change is a *correction* — fixing a
+  /// wrongly-marked attendance from the client file, where a party popper
+  /// over a bookkeeping fix would be beside the point.
+  void markVisit(String visitId, VisitStatus status, {bool celebrate = true}) {
+    final index = _visits.indexWhere((v) => v.id == visitId);
+    if (index < 0) return;
+    final visit = _visits[index];
+    if (visit.status == status) return;
+    _visits[index] = visit.copyWith(status: status);
+
+    if (celebrate &&
+        status == VisitStatus.attended &&
+        clientNeedsRenewal(visit.clientId)) {
+      pendingCelebrationClientId = visit.clientId;
+    } else if (!clientNeedsRenewal(visit.clientId) &&
+        pendingCelebrationClientId == visit.clientId) {
+      pendingCelebrationClientId = null;
+    }
+
+    _persist((cloud) => cloud.upsertVisit(_visits[index]));
+    notifyListeners();
   }
 
-  /// Days in [month] that have at least one appointment — the dots on
-  /// the calendar grid.
-  Set<int> scheduledDaysIn(DateTime month) => {
-        for (final visit in _visits)
-          if (visit.scheduledAt.year == month.year &&
-              visit.scheduledAt.month == month.month)
-            visit.scheduledAt.day,
-      };
+  /// Puts a visit back to "not recorded yet".
+  void undoVisit(String visitId) =>
+      markVisit(visitId, VisitStatus.scheduled, celebrate: false);
 
-  /// Appointments still to happen, soonest first — what "القادمة" lists.
-  List<Visit> get upcomingVisits {
-    final today = DateTime(now.year, now.month, now.day);
-    return _visits
-        .where((v) => !v.isResolved && !v.scheduledAt.isBefore(today))
-        .toList()
-      ..sort(_byScheduleThenIndex);
+  void consumeCelebration() {
+    pendingCelebrationClientId = null;
+  }
+
+  /// Records money received. Not capped: she can pay two packages' worth
+  /// at once, or hand over more than she owes and carry the credit.
+  Payment recordPayment({
+    required String clientId,
+    required double amount,
+    required PaymentMethod method,
+    DateTime? date,
+  }) {
+    final payment = Payment(
+      id: _nextId('pay'),
+      clientId: clientId,
+      amount: amount <= 0 ? 0 : amount,
+      method: method,
+      date: date ?? now,
+    );
+    _payments.add(payment);
+    _persist((cloud) => cloud.upsertPayment(payment));
+    notifyListeners();
+    return payment;
+  }
+
+  /// Corrects a payment — a wrong amount, a wrong method, a wrong date.
+  void updatePayment(
+    String paymentId, {
+    double? amount,
+    PaymentMethod? method,
+    DateTime? date,
+  }) {
+    final index = _payments.indexWhere((p) => p.id == paymentId);
+    if (index < 0) return;
+    _payments[index] = _payments[index].copyWith(
+      amount: amount == null ? null : (amount <= 0 ? 0 : amount),
+      method: method,
+      date: date,
+    );
+    _persist((cloud) => cloud.upsertPayment(_payments[index]));
+    notifyListeners();
+  }
+
+  /// Removes a payment recorded by mistake. The balance goes straight
+  /// back up by what it was worth, and the month's revenue back down.
+  void deletePayment(String paymentId) {
+    final index = _payments.indexWhere((p) => p.id == paymentId);
+    if (index < 0) return;
+    _payments.removeAt(index);
+    _persist((cloud) => cloud.deletePayment(paymentId));
+    notifyListeners();
   }
 }
 
-/// The three chips above the client list.
+/// The filter chips on العميلات.
 enum ClientFilter {
   all('الكل'),
   needsRenewal('تحتاج تجديد'),

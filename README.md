@@ -1,7 +1,7 @@
 # تَغذية (Taghdiya)
 
 An Arabic, right-to-left Android app for a dietitian to run her practice:
-today's visits, client files, packages and payments. Built in Flutter on
+today's visits, the schedule, client files and payments. Built in Flutter on
 Material 3, from the design canvas and implementation spec.
 
 ## Running it
@@ -9,7 +9,7 @@ Material 3, from the design canvas and implementation spec.
 ```sh
 flutter pub get
 flutter run           # a connected device or emulator
-flutter test          # 94 unit and widget tests
+flutter test          # 102 unit and widget tests
 flutter analyze
 ```
 
@@ -45,10 +45,11 @@ the project's Firestore → Rules tab (or deploy it with the Firebase CLI)
 | ملف العميلة — client file | `lib/screens/client_detail_screen.dart` |
 | الملخص — dashboard | `lib/screens/summary_screen.dart` |
 | حسابي — the dietitian's own page | `lib/screens/profile_screen.dart` |
-| باقة جديدة — sell a package | `lib/screens/new_package_screen.dart` |
+| الدفعات — who owes what | `lib/screens/payment_screen.dart` |
 | موعد جديد / تعديل الموعد | `lib/screens/appointment_sheet.dart` |
 | عميلة جديدة / تعديل بياناتها | `lib/screens/new_client_sheet.dart` |
 | اكتمال الباقة — celebration | `lib/screens/package_complete_screen.dart` |
+| تسجيل دفعة | `lib/screens/record_payment_sheet.dart` |
 | اليوم، فارغ — empty today | `_TodayEmpty` in `today_screen.dart` |
 | العميلات، فارغ — empty clients | `_ClientsEmpty` in `clients_screen.dart` |
 | بطاقة التقدّم — shareable card | `lib/widgets/progress_card.dart` |
@@ -93,20 +94,16 @@ through Firebase's own console by whoever owns the account (see
   `firestore.rules`: every document lives under `practices/{uid}/...`,
   and the rule is simply "only that uid, signed in, may touch it."
 
-There is one package to sell — **٤ زيارات for ١٠٠ ₪**
-(`AppStore.packageOptions`). With nothing to choose between, باقة جديدة
-shows it as the package rather than as an option: no radio, nothing to
-tap. It is still a list, so a second shape would bring the choice back on
-its own without touching the screen.
+There is one package — **٤ زيارات for ١٠٠ ₪** (`AppStore.packageRate`) —
+and it is a *rate*, not a record. Nothing is stored per package; a
+client's attended visits are counted and divided by it.
 
-`NewPackageScreen` works two ways. As a tab it starts with no client and
-asks who the package is for — offering whoever just finished a package as
-a *labelled* suggestion rather than filling her in silently, which read as
-arbitrary. Pushed with a client (from her file, a "تجديد" button, or the
-celebration) it opens on her and shows a back chevron. Saving pops when
-there is a route to pop, and otherwise clears the form and returns the
-shell to today's list. The celebration is a transparent route pushed over
-Today, so the list stays visible behind the scrim.
+الدفعات is the tab that replaced a "sell a package" screen. Nothing is
+sold in advance any more, so a form for creating a package had nothing to
+do: the useful screen is the list of people whose visits have run past
+what they have paid, tap-to-collect. The celebration is a transparent
+route pushed over Today, so the list stays visible behind the scrim, and
+it now offers تسجيل دفعة rather than a sale.
 
 ## How it is put together
 
@@ -132,16 +129,21 @@ they're both just showing the same account's data live, not two
 separate local copies. `AppStore` has two ways to start:
 
 - `AppStore()` — in-memory only, seeded fresh each time from
-  `SampleData`. What tests use, so a test run never touches a real
-  network. Nothing here persists or syncs.
+  `SampleData`. What the tests and demo mode use, so neither ever
+  touches a real network. Nothing here persists or syncs.
 - `AppStore.forUser(firestore, uid)` — what `AuthGate` builds the moment
   someone signs in. Starts **empty**, deliberately: a real account gets
   her real clients, not a demo roster of fictional ones she'd have to
   delete. It opens three live Firestore listeners (`CloudStore.watchClients/
-  watchPackages/watchVisits` in `cloud_store.dart`) and rebuilds the
+  watchVisits/watchPayments` in `cloud_store.dart`) and rebuilds the
   in-memory lists — and calls `notifyListeners()` — every time any of
   them fires, which happens for a change made on *this* device and one
   made on any other device signed into the same account alike.
+
+Three collections under `practices/{uid}/`: `clients`, `visits`,
+`payments`. Payments are their own collection rather than nested inside
+a package document, because there are no package documents — what a
+payment settles is a running balance.
 
 Every mutation (`markVisit`, `recordPayment`, `sellPackage`, …) updates
 the in-memory lists immediately either way, so the UI never waits on a
@@ -170,64 +172,89 @@ the whole layout mirrors — nav bar, rows, chevrons — not just text
 alignment. The confetti on the celebration screen stays in plain
 left-to-right coordinates, since it is just scattered shapes.
 
-## How visits are counted
+## How visits are counted, and how money follows
 
-**A missed appointment costs the client nothing.** She bought four
-visits; only a visit she actually attended spends one. Marking لم تحضر
-records the miss — it stays in her file, dated, and the row says
-"لم تُحتسب" so it can't be misread — but the package keeps its remaining
-visits, stays open, and the next appointment is still "الزيارة ٣ من ٤".
-That is why `remainingVisits` and `isPackageComplete` count
-`attendedCount`, and why `visitNumber` returns null for a no-show rather
-than a position.
+**Appointments and money are not linked.** An appointment belongs to a
+client, not to a package — because the real order of events is *book,
+come, then pay*, and an appointment that had to belong to a package she
+hadn't bought yet couldn't be booked at all. There are no package
+records: `Visit` and `Payment` each carry a `clientId` and nothing else.
 
-Everything that can move that count — marking a visit, undoing it,
-correcting it from the client file, deleting the appointment, reassigning
-it to someone else — goes through `AppStore._reconcilePackage`, which
-opens or closes the package from the attendance alone. So correcting a
-حضرت back to لم تحضر reopens a package that visit had closed, without
-anything having to remember that it was the one that closed it. Only
-marking a visit on اليوم celebrates; a correction passes
-`celebrate: false`, because a party popper over a bookkeeping fix reads
-as a bug.
+Everything else is arithmetic on those two lists:
+
+| Question | Answer |
+|---|---|
+| How many visits has she had? | attended visits + `Client.priorVisits` |
+| Which visit of four is she on? | `((attended − 1) % 4) + 1` |
+| How many left before the next ١٠٠ ₪? | `4 − visitInPackage` |
+| What has she cost? | `ceil(attended / 4) × ١٠٠ ₪` |
+| What does she owe? | that, minus everything she has paid |
+
+So being a package behind is a number, not a state — and being *two*
+behind, which happens, needs no special case. The fifth visit starts the
+second package and adds the second ١٠٠ ₪; the ninth starts the third.
+
+**A missed appointment costs nothing.** She bought four visits; only a
+visit she actually attended spends one. Marking لم تحضر records the miss
+— it stays in her file, dated, and the row says "لم تُحتسب" so it can't
+be misread — but her count doesn't move, and neither does her balance.
+That is why every figure above counts `attended` and `visitNumber`
+returns null for a no-show.
+
+Because it is all derived, correcting anything just works. Change a
+حضرت back to a لم تحضر, delete an appointment, fix a payment's amount:
+the counts, the balance and the "needs to renew" flag all fall out of the
+same arithmetic on the next read. Nothing has to be reconciled, because
+nothing was cached.
+
+**A client who was already coming.** `Client.priorVisits` and
+`priorPaid` are opening balances for someone entered mid-relationship —
+she has been coming for months and is only now being written down, or a
+few visits never got recorded. They count alongside the dated rows, so
+her position in the current package is right from the first day. Held as
+numbers rather than invented visit records, because those would need
+dates nobody has; the client file shows them as "٣ زيارة سابقة" instead.
+Both are editable afterwards, since the answer is often "actually,
+three".
 
 ## The schedule
 
 المواعيد is a month grid with a dot on every day that has someone on it,
 the selected day's appointments underneath, and full control over each
-one: book, move the time or the date, hand it to a different client, or
-cancel it. The rules it enforces:
+one: book, move the time or the date, hand it to a different client,
+change what happened, or cancel it.
 
-- **Only ahead.** The date picker starts at today and saving rejects a
-  time already gone. A new appointment opens on the next quarter hour
-  rather than a fixed 10:00, so the sheet never opens already invalid.
-  A past day can be read but not booked into.
+- **Nothing has to be bought first.** A brand-new client can be booked
+  the moment she is written down — `حفظ وحجز موعد` on the new-client
+  sheet does both in one go.
 - **Any time, to the minute.** A visit is a point in the day, not a slot
-  out of a fixed grid; nothing rounds what she picks.
-- **Recorded appointments are frozen.** Once حضرت or لم تحضر is on it,
-  the appointment happened — the sheet locks the fields and says so.
-  It can still be cancelled, and the attendance itself is corrected from
-  the client's file, which is where that call was made.
-- **Booking searches.** Twenty-four names is past scrolling, so the
-  picker leads with a search field, and a search that finds nobody offers
-  to add her then and there — she comes back as the picked client, and
-  the sheet then says what is still missing (a running package) and
-  offers to sell her one.
+  out of a fixed grid; nothing rounds what she picks. A new appointment
+  opens on the next quarter hour rather than a fixed 10:00, so the sheet
+  never opens already invalid.
+- **Forwards or backwards.** A future date is a booking. A past one is
+  something she is writing up after the fact — "she came last Tuesday and
+  I never wrote it down", or "she came without an appointment at all" —
+  so the sheet carries a حضرت / لم تحضر / موعد status field and defaults
+  a past date to حضرت. Only a *scheduled* appointment is required to be
+  in the future; a recorded one can sit wherever it happened.
+- **Nothing is frozen.** An appointment already marked حضرت can still
+  have its date, time, client or outcome changed. An earlier version
+  locked those, on the theory that a recorded visit is history — but
+  "I wrote that down wrong" is the normal case, not an edge one.
 
-An appointment is a `Visit` against a package she has already bought, so
-booking one always needs a running package; `AppStore.canSchedule`
-answers that before the sheet lets anything be saved.
-
-## Correcting things
+## Correcting things## Correcting things
 
 Nothing entered is a one-way door:
 
 | Wrong | Fixed from |
 |---|---|
-| Attendance ("she came" — she didn't) | ملف العميلة → تعديل on the visit row |
+| Attendance ("she came" — she didn't) | ملف العميلة → تعديل on the visit row, or المواعيد → tap it |
+| A visit that was never recorded | المواعيد → إضافة موعد, back-date it, mark حضرت |
+| How many visits she had before all this | ملف العميلة → ⋯ → تعديل البيانات |
 | A name, phone or age | ملف العميلة → ⋯ → تعديل البيانات |
-| A client who shouldn't be there | ملف العميلة → ⋯ → حذف العميلة (takes her packages, payments and visits with her) |
-| A payment for the wrong amount | ملف العميلة → الدفعات → 🗑 (the balance goes straight back up) |
+| A client who shouldn't be there | ملف العميلة → ⋯ → حذف العميلة (takes her appointments and payments with her) |
+| A payment's amount, date or method | ملف العميلة → tap the payment |
+| A payment that shouldn't exist | ملف العميلة → الدفعات → 🗑 (the balance goes straight back up) |
 | An appointment's time, date or client | المواعيد → tap it |
 | An appointment that shouldn't exist | المواعيد → tap it → حذف الموعد |
 | Her own name, her password | حسابي → الحساب |

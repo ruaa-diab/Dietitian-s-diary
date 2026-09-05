@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_store.dart';
 import '../data/store_scope.dart';
 import '../models/models.dart';
 import '../theme/app_colors.dart';
@@ -94,13 +95,12 @@ class _VisitCard extends StatelessWidget {
       );
     }
 
-    final pkg = store.package(visit.packageId);
-    final attended = store.attendedCount(pkg.id);
+    final perPackage = AppStore.packageRate.visitCount;
     // Which visit of the package this one would be if she attends — not
     // the slot it was booked into. A missed appointment left the count
     // where it was, so this may well be a number she has seen before.
-    final visitNumber = store.visitNumber(visit) ?? attended + 1;
-    final isFinalVisit = visitNumber == pkg.visitCount;
+    final visitNumber = store.visitNumber(visit) ?? 1;
+    final isFinalVisit = visitNumber == perPackage;
 
     return AppCard(
       child: Column(
@@ -139,14 +139,14 @@ class _VisitCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      'الزيارة ${fmtInt(visitNumber)} من ${fmtInt(pkg.visitCount)}',
+                      'الزيارة ${fmtInt(visitNumber)} من ${fmtInt(perPackage)}',
                       style: AppText.pill.copyWith(
                         // The closing visit of a package is called out in sage.
                         color: isFinalVisit ? AppColors.sage : AppColors.textMuted,
                       ),
                     ),
                     const SizedBox(height: 6),
-                    ProgressDots(total: pkg.visitCount, done: attended),
+                    ProgressDots(total: perPackage, done: visitNumber - 1),
                   ],
                 ),
               ],
@@ -186,12 +186,10 @@ class _VisitCard extends StatelessWidget {
     final navigator = Navigator.of(context);
     store.markVisit(visit.id, status);
 
-    final completed = store.pendingCelebration;
-    if (completed == null) return;
+    final finished = store.pendingCelebrationClientId;
+    if (finished == null) return;
     store.consumeCelebration();
-    navigator.push(
-      PackageCompleteScreen.route(packageId: completed.id),
-    );
+    navigator.push(PackageCompleteScreen.route(clientId: finished));
   }
 }
 

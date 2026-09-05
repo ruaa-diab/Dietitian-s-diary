@@ -16,8 +16,8 @@ class ProgressCard extends StatelessWidget {
   const ProgressCard({
     super.key,
     required this.client,
-    required this.package,
     required this.packageNumber,
+    required this.packageSize,
     required this.days,
     required this.attendedVisits,
     this.byline,
@@ -26,12 +26,17 @@ class ProgressCard extends StatelessWidget {
   });
 
   final Client client;
-  final ClientPackage package;
 
   /// 1-based position of this package in the client's history — "الباقة
   /// الأولى", "الثانية", and so on.
   final int packageNumber;
+
+  /// Visits in a package — ٤.
+  final int packageSize;
+
   final int days;
+
+  /// Visits she has attended in total.
   final int attendedVisits;
 
   /// The dietitian's name and title under the brand mark. Passed in
@@ -94,7 +99,7 @@ class ProgressCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _StatTile(
-                    value: fmtInt(package.visitCount),
+                    value: fmtInt(packageSize),
                     label: 'الباقة',
                   ),
                 ),

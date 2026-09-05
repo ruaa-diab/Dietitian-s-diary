@@ -9,10 +9,9 @@ enum AppTab {
   today('اليوم'),
   schedule('المواعيد'),
   clients('العميلات'),
-  // Shortened from "باقة جديدة", which is still the screen's own title —
-  // six labels have to share the bar's width, and this one was the only
-  // one that had to truncate to fit.
-  newPackage('باقة'),
+  // Shortened from "الدفعات", the screen's own title — six labels have
+  // to share the bar's width.
+  payments('دفعات'),
   summary('الملخص'),
   profile('حسابي');
 
@@ -33,7 +32,7 @@ class AppBottomNav extends StatelessWidget {
     AppTab.today: AppIcons.calendar,
     AppTab.schedule: AppIcons.clock,
     AppTab.clients: AppIcons.person,
-    AppTab.newPackage: AppIcons.plus,
+    AppTab.payments: AppIcons.card,
     AppTab.summary: AppIcons.bars,
     AppTab.profile: AppIcons.profile,
   };

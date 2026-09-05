@@ -129,6 +129,14 @@ abstract final class ArabicDates {
     return '${fmtInt(count)} زيارة';
   }
 
+  /// `باقتان` — Arabic pluralisation for a package count.
+  static String packages(int count) {
+    if (count == 1) return 'باقة واحدة';
+    if (count == 2) return 'باقتين';
+    if (count >= 3 && count <= 10) return '${fmtInt(count)} باقات';
+    return '${fmtInt(count)} باقة';
+  }
+
   /// Whole days between two dates, ignoring the time of day.
   static int daysBetween(DateTime from, DateTime to) {
     final a = DateTime(from.year, from.month, from.day);
